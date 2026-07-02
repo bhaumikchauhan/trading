@@ -1,4 +1,7 @@
+import concurrent.futures
 import os
+import threading
+import time
 import pandas as pd
 from datetime import datetime, timedelta
 import traceback
@@ -21,10 +24,29 @@ HOST = os.getenv("HOST_SERVER") or os.getenv("OPENALGO_HOST", "http://127.0.0.1:
 required_cols = ["open", "high", "low", "close", "volume"]
 one_year_ago = pd.Timestamp(datetime.now() - timedelta(days=365))
 
-OUTPUT_FILE = "strategy_output.xlsx"
+OUTPUT_FILE = f"strategy_output_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
 
-# Column order in the output workbook: Symbol, then one column per factor
-COLUMNS = ["Symbol", "RSI5", "MACD", "EMA Ribbon", "Stochastic", "Volume", "Candle"]
+# Column order in the output workbook: Symbol, then all concise columns first, then all detailed columns
+COLUMNS = [
+    "Symbol",
+    "RSI5 Value",
+    "MACD Value",
+    "EMA Ribbon",
+    "Stochastic Value",
+    "Volume Value",
+    "Candle % Change",
+    "RSI5",
+    "MACD",
+    "Stochastic",
+    "Volume",
+    "Candle",
+    "Green Count",
+    "Red Count",
+    "Neutral Count",
+]
+
+# Columns whose cells should wrap onto multiple lines within a single cell
+WRAP_COLUMNS = {"EMA Ribbon"}
 
 # Fill colors for bullish / bearish; neutral gets no fill
 BULLISH_FILL = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
@@ -37,17 +59,56 @@ HEADER_FILL = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="s
 client = api(api_key=API_KEY, host=HOST)
 
 
+def load_symbols(csv_path="all_symbols.csv"):
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Symbol file not found: {csv_path}")
+
+    df = pd.read_csv(csv_path, header=None, usecols=[0], names=["symbol"] )
+    symbols = df["symbol"].astype(str).str.strip()
+    symbols = symbols[symbols != ""].tolist()
+    return symbols
+
+
+def process_symbol(symbol, index, total):
+    print(f"Processing symbol {symbol} ({index}/{total})...")
+    row = analyze_stock(symbol)
+    return index, row
+
+
 def main():
     try:
         print("Starting the main function...")
-        symbols = ["HSCL", "WOCKPHARMA", "GOODLUCK", "MSTCLTD", "MINDACORP", "JAYBARMARU"]
+        symbols = load_symbols()
+        #symbols = ["HSCL", "WOCKPHARMA", "GOODLUCK", "MSTCLTD", "MINDACORP", "JAYBARMARU"]
+        total = len(symbols)
         rows = []
-        for symbol in symbols:
-            row = analyze_stock(symbol)
-            if row is not None:
-                rows.append(row)
+        failed_symbols = []
+        failed_symbols_lock = threading.Lock()
 
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, total or 1)) as executor:
+            future_to_symbol = {
+                executor.submit(process_symbol, symbol, index, total): symbol
+                for index, symbol in enumerate(symbols, start=1)
+            }
+
+            for future in concurrent.futures.as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
+                try:
+                    index, row = future.result()
+                except Exception as e:
+                    print(f"Error processing symbol {symbol}: {e}")
+                    with failed_symbols_lock:
+                        failed_symbols.append(symbol)
+                    continue
+                if row is not None:
+                    rows.append((index, row))
+
+        rows.sort(key=lambda item: item[0])
+        rows = [row for _, row in rows]
         write_excel(rows)
+
+        if failed_symbols:
+            print(f"Symbols with processing errors: {failed_symbols}")
 
     except Exception as e:
         print(f"Error in main: {e}\n{traceback.format_exc()}")
@@ -56,11 +117,10 @@ def main():
 def analyze_stock(symbol):
     # Fetch historical data for the symbol
     end = (datetime.now()).strftime("%Y-%m-%d")
-    if datetime.now().hour < 15:  # If before 3.30 PM, use yesterday's date
-        end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    elif datetime.now().hour == 15 and datetime.now().minute < 30:  # If before 3.30 PM, use yesterday's date
+    if datetime.now().hour < 18:  # If before 6 PM, use yesterday's date
         end = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     
+
     start = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")  # Last 100 days
     df = client.history(symbol=symbol, exchange="NSE", interval="D", start_date=start, end_date=end)
 
@@ -68,14 +128,26 @@ def analyze_stock(symbol):
     if not all(col in df.columns for col in required_cols):
         print(f"Data for {symbol} is missing required columns.")
         return None
+    
+    if df.empty or len(df) < 50:  # Ensure we have enough data points for analysis
+        print(f"Not enough data for {symbol}.")
+        return None
 
     row = {"Symbol": {"value": symbol, "sentiment": "neutral"}}
-    row["RSI5"] = check_rsi(symbol, df, period=5)
-    row["MACD"] = check_macd(df)
+
+    row["RSI5"], row["RSI5 Value"] = check_rsi(symbol, df, period=5)
+    row["MACD"], row["MACD Value"] = check_macd(df)
     row["EMA Ribbon"] = check_ema(symbol, df)
-    row["Stochastic"] = check_stochastic(symbol, df)
-    row["Volume"] = check_volume(symbol, df)
-    row["Candle"] = check_candle(symbol, df)
+    row["Stochastic"], row["Stochastic Value"] = check_stochastic(symbol, df)
+    row["Volume"], row["Volume Value"] = check_volume(symbol, df)
+    row["Candle"], row["Candle % Change"] = check_candle(symbol, df)
+
+    factor_keys = ["RSI5", "MACD", "EMA Ribbon", "Stochastic", "Volume", "Candle"]
+    counts = count_sentiments(row, factor_keys)
+    row["Green Count"] = {"value": counts["bullish"], "sentiment": "neutral"}
+    row["Red Count"] = {"value": counts["bearish"], "sentiment": "neutral"}
+    row["Neutral Count"] = {"value": counts["neutral"], "sentiment": "neutral"}
+
     return row
 
 
@@ -94,7 +166,9 @@ def check_rsi(symbol, df, period=5):
         note = "NEUTRAL (40-60) -> no extreme; 50 is the bull/bear line"
 
     value = f"{rsi:.2f} ({note})"
-    return {"value": value, "sentiment": sentiment}
+    full = {"value": value, "sentiment": sentiment}
+    concise = {"value": f"{rsi:.2f}", "sentiment": sentiment}
+    return full, concise
 
 
 def check_macd(df):
@@ -109,7 +183,9 @@ def check_macd(df):
     push = "strengthening" if h > 0 else "weakening / negative"
 
     value = f"MACD={m:.2f}, Signal={s:.2f}, Hist={h:.2f} | {momentum}, {push}"
-    return {"value": value, "sentiment": sentiment}
+    full = {"value": value, "sentiment": sentiment}
+    concise = {"value": f"MACD={m:.2f}, Signal={s:.2f}", "sentiment": sentiment}
+    return full, concise
 
 
 def check_ema(symbol, df):
@@ -131,8 +207,10 @@ def check_ema(symbol, df):
         sentiment = "neutral"
         note = "tangled / no clear trend"
 
-    ema_str = ", ".join(f"EMA{p}={emas[p]:.2f}" for p in periods)
-    value = f"Close={df['close'].iloc[-1]:.2f} | {ema_str} | {note}"
+    lines = [f"Close={df['close'].iloc[-1]:.2f}"]
+    lines += [f"EMA{p}={emas[p]:.2f}" for p in periods]
+    lines.append(note)
+    value = "\n".join(lines)
     return {"value": value, "sentiment": sentiment}
 
 
@@ -153,7 +231,18 @@ def check_stochastic(symbol, df):
     cross = "%K above %D -> bullish tilt" if kv > dv else "%K below %D -> bearish tilt"
 
     value = f"%K={kv:.2f}, %D={dv:.2f} | {zone} | {cross}"
-    return {"value": value, "sentiment": sentiment}
+    full = {"value": value, "sentiment": sentiment}
+    concise = {"value": f"%K={kv:.2f}, %D={dv:.2f}", "sentiment": sentiment}
+    return full, concise
+
+
+def count_sentiments(row, factor_keys):
+    sentiments = [row[key].get("sentiment", "neutral") for key in factor_keys if isinstance(row.get(key), dict)]
+    return {
+        "bullish": sum(1 for s in sentiments if s == "bullish"),
+        "bearish": sum(1 for s in sentiments if s == "bearish"),
+        "neutral": sum(1 for s in sentiments if s == "neutral"),
+    }
 
 
 def check_volume(symbol, df):
@@ -171,7 +260,9 @@ def check_volume(symbol, df):
         note = "Volume is decreasing -> bearish tilt"
 
     value = f"Current={current_volume:,}, Prev={prev_volume:,} | {note}"
-    return {"value": value, "sentiment": sentiment}
+    full = {"value": value, "sentiment": sentiment}
+    concise = {"value": f"Current={current_volume:,}, Prev={prev_volume:,}", "sentiment": sentiment}
+    return full, concise
 
 
 def check_candle(symbol, df):
@@ -183,10 +274,11 @@ def check_candle(symbol, df):
     low_price = last_candle["low"]
  
     if open_price == 0:
-        return {"value": "N/A (zero open)", "sentiment": "neutral"}
- 
+        na = {"value": "N/A (zero open)", "sentiment": "neutral"}
+        return na, na
+
     pct_change = (close_price - open_price) / open_price * 100
- 
+
     if pct_change > 5:
         sentiment = "bullish"
         note = f"Close is {pct_change:.2f}% above open -> bullish"
@@ -196,9 +288,11 @@ def check_candle(symbol, df):
     else:
         sentiment = "neutral"
         note = f"Close is {pct_change:.2f}% vs open -> within +/-5% range"
- 
+
     value = f"O={open_price:,.2f} H={high_price:,.2f} L={low_price:,.2f} C={close_price:,.2f} | {note}"
-    return {"value": value, "sentiment": sentiment}
+    full = {"value": value, "sentiment": sentiment}
+    concise = {"value": pct_change, "sentiment": sentiment}
+    return full, concise
 
 
 def write_excel(rows):
@@ -223,9 +317,14 @@ def write_excel(rows):
             elif cell_data["sentiment"] == "bearish":
                 cell.fill = BEARISH_FILL
             cell.font = Font(name="Arial")
+            if col_name in WRAP_COLUMNS:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-    # Reasonable column widths
-    widths = [14, 40, 55, 60, 45, 45, 60]
+        # Give the EMA row enough height to show its multi-line content
+        sheet.row_dimensions[row_idx].height = 90
+
+    # Reasonable column widths: Symbol, concise columns, detailed columns, and sentiment counts
+    widths = [14, 14, 14, 55, 14, 14, 14, 40, 46, 30, 30, 60, 12, 12, 12]
     for col_idx, width in enumerate(widths, start=1):
         sheet.column_dimensions[sheet.cell(row=1, column=col_idx).column_letter].width = width
 
@@ -234,4 +333,7 @@ def write_excel(rows):
 
 
 if __name__ == "__main__":
+    start_time = time.perf_counter()
     main()
+    elapsed = time.perf_counter() - start_time
+    print(f"⏱️ Total runtime: {elapsed:.2f} seconds")
