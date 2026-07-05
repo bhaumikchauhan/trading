@@ -1,10 +1,29 @@
 import concurrent.futures
+import logging
 import os
 import threading
 import time
 import pandas as pd
 from datetime import datetime, timedelta
 import traceback
+
+
+class SafeStreamHandler(logging.StreamHandler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+
+            try:
+                stream.write(msg + self.terminator)
+            except UnicodeEncodeError:
+                safe_msg = msg.encode(encoding, errors="replace").decode(encoding, errors="replace")
+                stream.write(safe_msg + self.terminator)
+
+            self.flush()
+        except Exception:
+            self.handleError(record)
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -13,7 +32,26 @@ from openalgo import api, ta
 
 from retrieve_nifty_symbols import get_nifty_constituents
 
-print("🔁 OpenAlgo Python Bot is running.")
+# =========================
+# LOGGING
+# =========================
+LOG_FILE = f"strategy_output_{datetime.now():%Y%m%d_%H%M%S}.log"
+logger = logging.getLogger("strategy_output")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+if not logger.handlers:
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+
+    console_handler = SafeStreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+logger.info("🔁 OpenAlgo Python Bot is running.")
 
 # =========================
 # CONFIG
@@ -70,16 +108,17 @@ def load_symbols(csv_path="all_symbols.csv"):
 
 
 def process_symbol(symbol, index, total):
-    print(f"Processing symbol {symbol} ({index}/{total})...")
+    logger.info(f"Processing symbol {symbol} ({index}/{total})...")
     row = analyze_stock(symbol)
     return index, row
 
 
 def main():
     try:
-        print("Starting the main function...")
+        logger.info("Starting the main function...")
         symbols = load_symbols()
-        #symbols = ["HSCL", "WOCKPHARMA", "GOODLUCK", "MSTCLTD", "MINDACORP", "JAYBARMARU"]
+        #symbols = ["ARENTERP", "ANDHRAPAP", "IEX", "ASHOKLEY", "UNIDT-BE", "ARVIND", "MAZDOCK", "ICEMAKE", "BPCL", "LIKHITHA-BE", "ABREL", "EVERESTIND", "622GS2035-GS", "EPL", "FINCABLES", "FEDERALBNK", "AARON", "ACCURACY", "GLOBAL", "HINDPETRO", "REPL-BE", "IFCI", "SHIVAMILLS-BE", "IFBIND", "RBA", "MOGSEC", "ASTERDM", "LYKALABS", "JBCHEPHARM", "KOTAKBANK", "KCP", "WEALTH", "CARYSIL", "LIQUIDETF", "KREBSBIO", "NELCO", "HEIDELBERG", "RAILTEL", "SANDHAR", "CONSUMBEES", "NILKAMAL", "CRAFTSMAN", "RALLIS", "SUDARSCHEM", "CORALFINAC", "SAMBHAAV", "CUBEXTUB", "SILINV", "REGENCERAM", "ZENITHEXPO", "RELINFRA-BE", "SAREGAMA", "FDC", "CYBERTECH", "RAJVIR-BZ", "CARTRADE", "FOCUS", "ARTNIRMAN", "NIFTYETF", "TECH", "LAXMICOT", "833GS2032-GS", "683GS2039-GS", "POLICYBZR", "923GS2043-GS", "773GS2034-GS", "761GS2030-GS", "697GS2026-GS", "679GS2029-GS", "668GS2031-GS", "817GS2044-GS", "759GS2029-GS", "772GS2055-GS", "MHLXMIRU", "SILVER", "AVANTIFEED", "CINEVISTA", "MAHLIFE", "KTKBANK", "MIDCAP", "DALBHARAT", "726GS2029-GS", "IDBIGOINAV", "GOLDSHINAV", "ICICISINAV", "GOLDBEINAV", "SILVERINAV", "AXISGOINAV", "NETFSIINAV", "IVZINGINAV", "BSLGOLINAV", "ICICIGINAV", "HDFCMFINAV", "KOTAKGINAV", "QGOLDHINAV", "SETFGOINAV", "RSSOFTWARE-BE", "GLFL-BE", "MIDCAPETF", "SGBMAR30X-GB", "VIPULLTD", "MITCON-BE", "XELPMOC", "BLUECHIP-BE", "TNIDETF", "PRIVISCL", "GAEL", "UMAEXPORTS-BE", "SUPERSPIN-BE", "VERANDA", "EUROTEXIND-BE", "E2E", "RITCO", "QUINTEGRA-BE", "NILAINFRA", "IOB", "TAJGVK", "ARROWGREEN-BE", "KRITIKA", "GOLDTECH", "BSLSENINAV", "AXISHCINAV", "ABSLNNINAV", "AXISBPINAV", "AXISCEINAV", "AXISBNINAV", "AXISNIINAV", "DSPN50INAV", "DSPNEWINAV", "EBANKINAV", "AXISTEINAV", "DSPQ50INAV", "LIQUIEINAV", "EBBE23INAV", "EBBE30INAV", "EBBE31INAV", "EBBE32INAV", "BBETF0INAV", "HBANKEINAV", "ICICIKINAV", "HDFCNFINAV", "HDFCSEINAV", "ICICIPINAV", "738GS2027-GS", "ICICIOINAV", "ICICI2INAV", "TECHINAV", "ABSLBAINAV", "VIKASLIFE", "HEALTHINAV", "BSLNIFINAV", "ICICITINAV", "ICICIXINAV", "ICICIQINAV", "ICICICINAV", "ICICIMINAV", "ICICIRINAV", "ICICI5INAV", "ICICIAINAV", "ICICIFINAV", "ICICIBINAV", "ICICIYINAV", "ICICININAV", "ICICI1INAV", "ICICILINAV", "IVZINNINAV", "KOTAKBINAV", "IBMFNIINAV", "IDFNIFINAV", "LICNFNINAV", "KOTAKPINAV", "KOTAKNINAV", "KOTAKVINAV", "KOTAKAINAV", "KOTAKMINAV", "KOTAKIINAV", "LICN50INAV", "KOTAKLINAV", "MAMFGEINAV", "MAN50EINAV", "MAFANGINAV", "MANXT5INAV", "LICNETINAV", "MAHKTEINAV", "MAFSETINAV", "LICNGSINAV", "MAM150INAV", "MOM50INAV", "MON100INAV", "MOLOWVINAV", "MONQ50INAV", "MOM100INAV", "MOGSECINAV", "MAESGEINAV", "MOMOMEINAV", "MASPTOINAV", "SDL26BINAV", "AUTOBEINAV", "PHARMAINAV", "QNIFTYINAV", "SDL24BINAV", "LTGILTINAV", "MID150INAV", "ITBEESINAV", "SETF10INAV", "SBILTYINAV", "SBICONINAV", "SETF50INAV", "NETFINAV", "SETFNIINAV", "NPBETINAV", "SETFNNINAV", "UTISENINAV", "UTINIFINAV", "UTINEXINAV", "UTISXNINAV", "ICISECINAV", "ICISENINAV", "PPL", "LIQUIDINAV", "GILT5YINAV", "SBIETFINAV", "SBIFPBINAV", "UNIVAFOODS-BE", "TNIDETINAV", "UTIBANINAV", "KOCONSINAV", "GUJGASLTD", "HDFC50INAV", "ICICMOINAV", "MOHLTHINAV", "HDF100INAV", "KOKMNCINAV", "NFQLTYINAV", "ICINFRINAV", "MOMNTMINAV", "DSPSILINAV", "HDFCSIINAV", "GFSTEELS-BE", "MOQLTYINAV", "NUCLEUS", "MOVALUINAV", "AXISILINAV", "GRMOVER", "GVPTECH", "HDFCVLINAV", "HDFCQUINAV", "BGLOBAL-BZ", "LUXIND", "HDFCGRINAV", "BALAXI-BE", "DHANBANK", "AFFLE", "HDFCMOINAV", "HDFCLVINAV", "HDFCSENSEX", "LINCOLN", "ASTRAMICRO", "KOTARISUG", "BOHRAIND", "BASML", "HDFCPBINAV", "ICIFININAV", "NAGAFERT-BZ", "AURIONPRO", "SYNCOMF", "ACI", "FAZE3Q", "IMPAL", "KOTAKSINAV", "IC10GSINAV", "PVRINOX", "EBB433INAV", "COMMOIETF", "RCOM-BE", "JAGRAN", "ICICOMINAV", "SGBSEP27-GB", "DSPBNKINAV", "MUNJALAU", "VIDHIING", "GMRAIRPORT", "CLCIND-BE", "HBS500INAV", "HSM250INAV", "HMI150INAV", "JASH", "KOTLIQINAV", "MAGOLDINAV", "VEEDOL", "726GS2033-GS", "ZEEMEDIA", "ABSLLQINAV", "PSBKICINAV", "POCL", "RAJTV", "AXSNSXINAV", "EMBDL", "GOKULAGRO", "MNV30FINAV", "MAG813INAV", "CENTRALBK", "SAHYADRI", "CIEINDIA", "PURVA", "KPRMILL", "INDOWIND-BE", "MOTILALOFS", "GSEC10YEAR", "729GR2033-GS", "710GR2028-GS", "SILETFINAV", "MADHAV", "SVLL-BE", "COLPAL", "KAUSHALYA", "DSPGOINAV", "PIGL", "KIRIINDUS", "PAVNAIND-BE", "EBBETF0430", "PRINCEPIPE", "VAISHALI-BE", "CCAVENUE", "MASILINAV", "DPWIRES", "HDFCNIINAV", "DSPNITINAV", "ARTEMISMED", "SICAGEN", "TPHQ", "THYROCARE", "SHARIABEES", "MAWANASUG-BE", "BNKETFINAV", "PVTBANKADD", "MGL", "AMRUTANJAN", "LIQUID", "SETCO-BE", "LIQIDINAV", "DAMODARIND", "INCREDIBLE", "DSPPVBINAV", "DSPSENINAV", "DSPPSBINAV", "ICIQ30INAV", "SARDAEN", "TREL", "QUAL30IETF", "LLOYDSENGG", "GILLANDERS", "DBCORP", "NIM150INAV", "VPRPL-BE", "HDFLIQINAV", "NAVNIFINAV", "NDGL", "PERSISTENT", "ASIANHOTNR", "UNIVASTU", "MON500INAV", "SENSEXINAV", "SICALLOG-BE", "HEADSUP", "ROLLT-BE", "UMESLTD", "NBIFIN", "SFL", "CMICABLES-BZ", "ALPHAINAV", "KALYANI-BE", "ITETFINAV", "HMT-BZ", "GPPL", "JITFINFRA", "LIQSBIINAV", "LIQUIDSBI", "BLUEJET", "EGOLDINAV", "AKSHARCHEM", "ESILINAV", "CLEDUCATE-BE", "OBEROIRLTY", "PRESTIGE", "SHAH", "ESILVER", "IREDA", "JWL", "GANDHAR", "724GR2033-GS", "BNGOLDINAV", "JINDWORLD", "SUPERHOUSE", "JAMNAAUTO", "BHAGYANGR-BE", "MOTISONS", "INOXINDIA", "SURAJEST", "HUDCO", "IRBINVIT-IV", "TAGOLDINAV", "TASILVINAV", "EDUCOMP-BZ", "LIQCASINAV", "ERIS", "JYOTICNC", "SALASAR", "PALASHSECU", "OPTIEMUS", "TATSILV", "BANKBINAV", "NIFTYBINAV", "NIFITEINAV", "NIF10GINAV", "HDFPBKINAV", "HEALADINAV", "NIF5GINAV", "LICNMDINAV", "MOREALINAV", "MOS250INAV", "LIQADDINAV", "CAPITALSFB", "LICNMID100", "GLDCASINAV", "EXICOM", "GPTHEALTH", "SMACAPINAV", "LIQETFINAV", "MIDSMAINAV", "ABSPSEINAV", "SKIL-BZ", "MD150CINAV", "TOP100INAV", "BBNPNBINAV", "SBISILINAV", "EVINDINAV", "ABGSECINAV", "SBINEQINAV", "OILETFINAV", "LIQSHRINAV", "ESTER", "RELIABLE", "OMINFRAL", "GROWEVINAV", "ASHIANA", "DELPHIFX", "METALIINAV", "GSEC10INAV", "MODEFINAV", "TOP10AINAV", "EBNKNFINAV", "GROLIQINAV", "MOME50INAV", "MULCAPINAV", "STYLEBAAZA-BE", "GALAPREC", "TOP10ADD", "EUREKAFORB", "GRWWDFINAV", "BNKPSUINAV", "METALINAV", "VAL30IINAV", "GROWWGINAV", "IMPEXFERRO-BZ", "EMLTMQINAV", "LIQPLSINAV", "SRPL-BZ", "AFCONS", "CONSUMINAV", "ECAPININAV", "664GS2027-GS", "ANUHPHR", "698GR2054-GS", "IGIL", "GRRAILINAV", "NX30ADINAV", "UNGOLDINAV", "MSCIININAV", "GRN200INAV", "NIF100INAV", "AONETOINAV", "EQU200INAV", "GLD360INAV", "SELIPOINAV", "AXISVAINAV", "CASHIEINAV", "SILCASINAV", "SBIBPBINAV", "MID15INAV", "AONELIINAV", "MOCAPIINAV", "AONETOTAL", "GOLD360", "SELECTIPO", "ATULAUTO", "EQUA50INAV", "MON50EINAV", "GROWMOINAV", "EVIETFINAV", "MINFRAINAV", "SIL360INAV", "MONT50INAV", "GROWSLINAV", "EQUAL200", "MOTOURINAV", "INTERNINAV", "MOPSEINAV", "TOPETFINAV", "GROWLOINAV", "MOMGFINAV", "AONENFINAV", "SNXT30INAV", "MOMIDMINAV", "GROWWNINAV", "GRWN50INAV", "MOALPHINAV", "MOSILVINAV", "QUALITINAV", "GRONIFINAV", "GROWWPINAV", "LIQGRBINAV", "ELM250INAV", "ELIQUIINAV", "SML100INAV", "MGBEESINAV", "AOGOLDINAV", "GROWWRINAV", "NIFTYCINAV", "MOY100INAV", "MOME30INAV", "FLEXIAINAV", "MOENERINAV", "CHGOLDINAV", "GRW150INAV", "GRO250INAV", "SMALL2INAV", "ENERGYINAV", "CHEMINAV", "ENIFTYINAV", "MOIPOINAV", "ESENSEINAV", "MSCIADINAV", "AONE50INAV", "MOSERVINAV", "MOMNCINAV", "GRCAPMINAV", "SMAADDINAV", "MIDADDINAV", "SILBNDINAV", "GOLDBDINAV", "NEXT50INAV", "DIVIDEINAV", "TWCGLDINAV", "TOP20INAV", "NEXT5EINAV", "GRWMTLINAV", "ABSMSCINAV", "HLTCREINAV", "INFRAINAV", "GRWCHEINAV", "GROWWEINAV", "DEFENCINAV", "GHOSPIINAV", "AB10BKINAV", "HSBCGDINAV", "SBIMOMINAV", "BNK10DINAV", "AONESIINAV", "LTCASEINAV", "SBILIQINAV", "MOGOLDINAV", "SBI150INAV", "VALUEINAV", "GRWPSUINAV", "MOBK10INAV", "VISL-BE", "VEDPOWER-BE", "VOGL-BE", "VAML-BE", "SMAETFINAV", "SMALLGINAV", "RAJOOENG", "NBCC", "MCX", "MTEDUCARE-BE", "SREEL", "RMDRIP", "ANTHEM", "CRIZAC", "EBGNG", "BELLACASA", "GROWWNET", "BORANA", "668GS2040-GS", "GENSOL-BZ", "AGSTRA-BZ", "REGAAL-BE", "ARFIN", "EFCIL", "CPPLUS", "SIMBHALS-BZ", "VIKRAMSOLR-BE", "ADVANCE", "FCONSUMER-BZ", "DIL-BZ", "KSR", "ESENSEX", "GROWWCAPM", "FABTECH", "BONLON", "SBIMIDMOM", "VITAL-BE", "AEPL", "RSL", "KOTYARK-BE", "MARSONS", "ASTAR", "BI", "BATLIBOI", "BTTL", "COCKERILL", "PRADPME", "TAMBOLIIN", "FMCGADINAV", "SBIVALINAV", "SBISMLINAV", "ENEXTINAV", "SHRIKRISH", "SEIL", "SHINDL", "SONAL", "MSC360INAV", "PTBKGRINAV", "THAKDEV", "THACKER-BE"]
+        #symbols = ["SANWARIA-BZ"]
         total = len(symbols)
         rows = []
         failed_symbols = []
@@ -96,7 +135,7 @@ def main():
                 try:
                     index, row = future.result()
                 except Exception as e:
-                    print(f"Error processing symbol {symbol}: {e}")
+                    logger.exception(f"Error processing symbol {symbol}: {e}")
                     with failed_symbols_lock:
                         failed_symbols.append(symbol)
                     continue
@@ -108,10 +147,10 @@ def main():
         write_excel(rows)
 
         if failed_symbols:
-            print(f"Symbols with processing errors: {failed_symbols}")
+            logger.warning(f"Symbols with processing errors: {failed_symbols}")
 
     except Exception as e:
-        print(f"Error in main: {e}\n{traceback.format_exc()}")
+        logger.exception(f"Error in main: {e}")
 
 
 def analyze_stock(symbol):
@@ -124,13 +163,18 @@ def analyze_stock(symbol):
     start = (datetime.now() - timedelta(days=100)).strftime("%Y-%m-%d")  # Last 100 days
     df = client.history(symbol=symbol, exchange="NSE", interval="D", start_date=start, end_date=end)
 
+    if not hasattr(df, "columns") or df.empty:
+        logger.warning(f"No data returned for {symbol}.")
+        return None
+
+
     # Ensure required columns are present
     if not all(col in df.columns for col in required_cols):
-        print(f"Data for {symbol} is missing required columns.")
+        logger.warning(f"Data for {symbol} is missing required columns.")
         return None
     
     if df.empty or len(df) < 50:  # Ensure we have enough data points for analysis
-        print(f"Not enough data for {symbol}.")
+        logger.warning(f"Not enough data for {symbol}. Required at least 50 data points, got {len(df) if not df.empty else 0}.")
         return None
 
     row = {"Symbol": {"value": symbol, "sentiment": "neutral"}}
@@ -329,11 +373,11 @@ def write_excel(rows):
         sheet.column_dimensions[sheet.cell(row=1, column=col_idx).column_letter].width = width
 
     wb.save(OUTPUT_FILE)
-    print(f"✅ Excel report written to {OUTPUT_FILE}")
+    logger.info(f"✅ Excel report written to {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
     main()
     elapsed = time.perf_counter() - start_time
-    print(f"⏱️ Total runtime: {elapsed:.2f} seconds")
+    logger.info(f"Total runtime: {elapsed:.2f} seconds")
