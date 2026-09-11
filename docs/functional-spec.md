@@ -32,13 +32,13 @@ in a way that risks dropping true patterns.
 | 1 | Project Infrastructure | In Progress |
 | 2 | Data Ingestion Layer | Not Started |
 | 3 | Smoothing Layer | Not Started |
-| 4 | Pivot / Extrema Detection | Not Started |
+| 4 | Pivot / Extrema Detection | Done |
 | 5 | Rule-Based Pattern Matcher Framework | Not Started |
 | 6 | Pattern Implementations | Not Started |
 | 7 | Candidate Scoring & Ranking | Not Started |
 | 8 | Backtesting & Validation Framework | Not Started |
 | 9 | Alerting / Output Layer | Not Started |
-| 10 | Visualization & Reporting | Not Started |
+| 10 | Visualization & Reporting | In Progress |
 | 11 | ML Scorer (Optional / Future Phase) | Not Started |
 
 ---
@@ -81,10 +81,10 @@ in a way that risks dropping true patterns.
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 4.1 | Implement local extrema detection on smoothed series | Not Started | e.g. rolling-window comparison or argrelextrema |
-| 4.2 | Normalize pivots into compact sequence: (index, timestamp, price, type: peak/trough) | Not Started | Core data structure used by all pattern matchers |
-| 4.3 | Handle edge cases: consecutive same-type pivots, flat/plateau extrema, series start/end | Not Started | |
-| 4.4 | Visualization utility: plot price + smoothed line + detected pivots | Not Started | Needed for manual QA throughout project |
+| 4.1 | Implement local extrema detection on smoothed series | Done | `pivots/extrema.py` (`find_local_extrema`, `scipy.signal.argrelextrema`) for continuously-smoothed series; `pivots/zigzag.py` (`zigzag_pivots`) as the threshold-based primary/default method — see technical-spec §3/§9 note on why ZigZag lives under `pivots/` rather than `smoothing/` |
+| 4.2 | Normalize pivots into compact sequence: (index, timestamp, price, type: peak/trough) | Done | `pivots/models.py`: `Pivot` (Pydantic) with `index`, `timestamp`, `price`, `type` |
+| 4.3 | Handle edge cases: consecutive same-type pivots, flat/plateau extrema, series start/end | Done | `_enforce_alternation()` collapses consecutive same-type extrema to the more extreme one; ZigZag alternates by construction; empty/flat series return no pivots rather than erroring |
+| 4.4 | Visualization utility: plot price + smoothed line + detected pivots | Done | `viz/charts.py::plot_pivots` (mplfinance candlesticks + pivot markers); manually verified against real `ANIKINDS-BE` history |
 
 ## 5. Rule-Based Pattern Matcher Framework
 
@@ -188,7 +188,7 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 10.1 | Chart rendering with detected pivots + pattern overlay for manual QA | Not Started | Used continuously during development |
+| 10.1 | Chart rendering with detected pivots + pattern overlay for manual QA | In Progress | Pivot overlay done (`viz/charts.py::plot_pivots`, built alongside task 4.4); pattern-span overlay pending pattern matchers |
 | 10.2 | Per-run summary report (candidates found, scores, pattern breakdown) | Not Started | |
 
 ## 11. ML Scorer (Optional / Future Phase)
@@ -211,3 +211,4 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 | 2026-09-11 | Initial functional specification created. |
 | 2026-09-11 | Project scaffolding complete (task 1.1–1.6): git repo, uv-managed src-layout package, pytest/ruff wired up, starter YAML configs, `candle_db.py`/`custom_logger.py` relocated into the package. See technical-spec for details. |
 | 2026-09-11 | Config loader implemented (task 1.6 → Done): Pydantic-validated loaders for smoothing, logging, and double-top pattern config, with unit tests covering both the real YAML files and validation failure cases. |
+| 2026-09-11 | Pivot/extrema detection implemented (task 4 → Done): `zigzag_pivots` (primary/default) and `find_local_extrema` (for future Savgol/kernel-regression smoothers), unified behind `detect_pivots()`; `plot_pivots` QA visualization built alongside (task 10.1, partial). Verified against real `ANIKINDS-BE` history, not just synthetic data. |

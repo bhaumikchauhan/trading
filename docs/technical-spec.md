@@ -65,8 +65,8 @@ chart_patterns/
 │       ├── __init__.py
 │       ├── config/              # YAML loading + Pydantic validation
 │       ├── data/                 # DataSource interface + adapters, OHLCV model
-│       ├── smoothing/            # Smoother interface: zigzag, savgol, kernel_regression
-│       ├── pivots/               # Extrema detection, Pivot model
+│       ├── smoothing/            # Continuous-series smoothers: savgol, kernel_regression (future)
+│       ├── pivots/               # Pivot model + all pivot detection: zigzag (default), extrema (§8 note)
 │       ├── patterns/             # PatternMatcher interface, registry, one module per pattern
 │       ├── scoring/              # Confidence scoring, ranking, dedup
 │       ├── backtest/             # Evaluation harness, precision/recall/F-beta metrics
@@ -264,11 +264,11 @@ tuning during backtesting (§7) means editing these YAML files, not code.
 OHLCVSource.get_bars()
         │
         ▼
-  Smoother (zigzag/savgol/kernel) ──▶ smoothed series
-        │
-        ▼
-  Pivot detector ──▶ List[Pivot]
-        │
+  pivots.detect_pivots(method="zigzag") ──▶ List[Pivot]        (ZigZag: default, implemented)
+        │                                    ▲
+        │                          smoothing.savgol/kernel ──▶ smoothed series
+        │                                    │
+        │                          pivots.detect_pivots(method="extrema")   (future smoothers, implemented)
         ▼
   PatternMatcher registry (one matcher per pattern type, sliding window over pivots)
         │
@@ -286,6 +286,21 @@ Each stage is a pure function/class over the previous stage's output — no stag
 reaches back into an earlier one's internals. This is what makes the ML scorer
 (functional-spec §11) a drop-in addition later: it only ever consumes `Candidate`
 objects, it doesn't change how candidates are produced.
+
+**Why ZigZag lives under `pivots/`, not `smoothing/`:** the original plan (§1
+Scope) treated smoothing and pivot detection as two strictly sequential stages —
+smooth the series, then find extrema on it. That holds for Savitzky-Golay and
+kernel regression, which really do produce an intermediate continuous series with
+no natural notion of a "pivot" until `find_local_extrema()` is run on it. ZigZag
+doesn't fit that shape: by definition, it *only* produces pivots — there is no
+separate continuous "ZigZag line" independent of the confirmed peak/trough
+sequence (chart platforms draw the ZigZag line by literally connecting
+consecutive pivots). Implementing it as `pivots/zigzag.py::zigzag_pivots()`
+(price series in, `list[Pivot]` out) reflects what it actually computes, rather
+than forcing an artificial intermediate "smoothed series" through an unrelated
+`smoothing/zigzag.py` module. `pivots.detect_pivots(series, method=...)` is the
+one entry point pattern matchers use regardless of which path produced the
+pivots.
 
 ## 9. Pattern Matcher Framework
 
@@ -389,4 +404,5 @@ class PatternMatcher(Protocol):
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-11 | Pivot detection implemented in `src/chart_patterns/pivots/`: `zigzag.py` (`zigzag_pivots`, the default threshold-based method, hand-traced and verified against real `ANIKINDS-BE` history), `extrema.py` (`find_local_extrema` via `scipy.signal.argrelextrema`, plus `_enforce_alternation` for the consecutive-same-type edge case, for future Savgol/kernel-regression smoothers), `models.py` (`Pivot`), unified via `detector.py::detect_pivots()`. Revised §8's pipeline diagram and added a rationale note: ZigZag is implemented directly under `pivots/` rather than `smoothing/`, since it has no separate continuous output distinct from its pivots. Also added `viz/charts.py::plot_pivots` (mplfinance candlesticks + pivot markers, Agg backend) ahead of schedule (originally §10) since it was the fastest way to visually verify pivot detection. |
 | 2026-09-11 | Project scaffolded: `git init`; `uv init --app --package` (Python 3.11, `uv_build` backend); runtime deps (pandas, numpy, scipy, pydantic, pyyaml, typer, matplotlib, mplfinance, pyarrow) added, `dev` group (pytest, pytest-cov, ruff, mypy) added, `ml` extra (scikit-learn, xgboost, lightgbm) registered but not installed. `src/chart_patterns/` created with one subpackage per pipeline stage (§3). Added `src/chart_patterns/paths.py` (`PROJECT_ROOT`, resolved by walking up to the nearest `pyproject.toml`) so relocated modules keep resolving `data/`/`output/` at the repo root regardless of package depth. Moved `candle_db.py` → `src/chart_patterns/data/candle_db.py` and `custom_logger.py` → `src/chart_patterns/custom_logger.py`, updating their path resolution and imports accordingly; verified against the real `data/candles.db` post-move. Added starter YAML configs (§6) and a pytest smoke test. Ruff configured with `select = ["E", "F", "I"]` (not the full opinionated default) and `line-length = 120`, with a per-file `E501` ignore for `candle_db.py` — its blind-except/naive-datetime patterns and long lines are pre-existing, intentional choices in provided code, not addressed by scaffolding. Fixed a real gitignore gap: the `data/*.db` pattern missed the 266MB `candles.db.2023_2025` backup (doesn't end in `.db`); changed to `data/*.db*`. |
