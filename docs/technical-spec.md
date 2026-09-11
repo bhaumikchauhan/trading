@@ -67,7 +67,7 @@ chart_patterns/
 │       ├── data/                 # DataSource interface + adapters, OHLCV model
 │       ├── smoothing/            # Continuous-series smoothers: savgol, kernel_regression (future)
 │       ├── pivots/               # Pivot model + all pivot detection: zigzag (default), extrema (§8 note)
-│       ├── patterns/             # PatternMatcher interface, registry, one module per pattern
+│       ├── patterns/             # Candidate model, registry, one module per pattern (double_top done)
 │       ├── scoring/              # Confidence scoring, ranking, dedup
 │       ├── backtest/             # Evaluation harness, precision/recall/F-beta metrics
 │       ├── alerts/                # Candidate -> alert model, output sinks
@@ -308,17 +308,52 @@ See [pivot-detection.md](pivot-detection.md) for a full algorithm walkthrough
 
 ## 9. Pattern Matcher Framework
 
+Implemented in `src/chart_patterns/patterns/` as:
+
 ```python
-class PatternMatcher(Protocol):
+# models.py
+class Candidate(BaseModel):
     pattern_type: str
-    def find_candidates(self, pivots: list[Pivot], config: PatternConfig) -> list[Candidate]: ...
+    pivots: list[Pivot]
+    confidence_score: float  # Field(ge=0, le=1)
+    metrics: dict[str, float]
+    symbol: str | None = None
+    timeframe: str | None = None
+    # start_index/end_index/start_timestamp/end_timestamp as properties over pivots[0]/pivots[-1]
+
+# registry.py
+PatternMatcherFn = Callable[[list[Pivot], Any], list[Candidate]]
+
+def register_pattern(name: str) -> Callable[[PatternMatcherFn], PatternMatcherFn]: ...
+def find_candidates(pattern_name: str, pivots: list[Pivot], config: Any) -> list[Candidate]: ...
 ```
 
-- A registry (`@register_pattern("double_top")`) lets new pattern modules plug in
-  without editing the core pipeline loop — satisfies functional-spec 5.4.
+This ended up as a plain function + dict-registry convention rather than the
+`Protocol` class originally sketched here — the same call made for
+`pivots.detect_pivots` (§8's rationale note applies equally here): with one
+pattern implemented so far, a formal interface class would be pure ceremony.
+Each pattern module (e.g. `double_top.py::find_double_top_candidates`) is a
+plain function decorated `@register_pattern("double_top")`; `config`'s type is
+`Any` at the registry boundary specifically so each matcher can declare its own
+concrete config type (`DoubleTopConfig`, etc.) in its own signature without
+mypy rejecting the registration on parameter-type variance grounds.
+
+- The registry lets new pattern modules plug in without editing the core
+  pipeline loop — satisfies functional-spec 5.4. Registration happens as a side
+  effect of `patterns/__init__.py` importing each pattern module, so importing
+  `chart_patterns.patterns` is what populates the registry.
 - Each matcher only depends on `list[Pivot]` and its own YAML-backed config
   object — no cross-pattern coupling, no direct DataFrame access (keeps unit
   tests fast: synthetic pivot lists, no need to fabricate OHLCV data per test).
+- Overlapping candidates (e.g. a 5-pivot peak-trough-peak-trough-peak sequence
+  satisfying the double-top rule twice) are all returned by design — recall
+  first, per the project's stated goal. Deduplication is functional-spec 7.3's
+  job, not the matcher's.
+- `viz/charts.py::plot_pivots` takes an optional `candidates: list[Candidate]`
+  and shades each one's span (`axvspan` between `start_index`/`end_index`) with
+  a `pattern_type (confidence)` annotation — this is how double-top candidates
+  found in real `candle_db` data were visually verified (functional-spec 6.1.5,
+  10.1).
 
 ## 10. Testing Strategy
 
@@ -408,6 +443,7 @@ class PatternMatcher(Protocol):
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-11 | Double Top pattern matcher implemented (§9): `patterns/models.py::Candidate`, `patterns/registry.py` (`register_pattern`/`find_candidates`), `patterns/double_top.py::find_double_top_candidates` (0.6 height-similarity / 0.4 trough-depth weighted confidence score). Ended up function+dict-registry, not the `Protocol` class originally sketched here — same rationale as `pivots.detect_pivots`. `plot_pivots` extended with an optional `candidates` overlay. Verified against a synthetic integration fixture and, manually, against 200 real symbols from `candle_db` (5,801 candidates at the default generous tolerances) with a QA chart rendered for a real instance. Along the way, fixed a real bug: `plot_pivots(title=None)` crashed because `mpf.plot` rejects `title=None` outright (needs the kwarg omitted, not set to `None`) — only surfaced once a test called `plot_pivots` without an explicit title. |
 | 2026-09-11 | Added [pivot-detection.md](pivot-detection.md), a detailed implementation deep-dive (algorithm walkthroughs, a hand-traced worked example, every class/function, edge cases) for `pivots/` and `viz/charts.py`. |
 | 2026-09-11 | Pivot detection implemented in `src/chart_patterns/pivots/`: `zigzag.py` (`zigzag_pivots`, the default threshold-based method, hand-traced and verified against real `ANIKINDS-BE` history), `extrema.py` (`find_local_extrema` via `scipy.signal.argrelextrema`, plus `_enforce_alternation` for the consecutive-same-type edge case, for future Savgol/kernel-regression smoothers), `models.py` (`Pivot`), unified via `detector.py::detect_pivots()`. Revised §8's pipeline diagram and added a rationale note: ZigZag is implemented directly under `pivots/` rather than `smoothing/`, since it has no separate continuous output distinct from its pivots. Also added `viz/charts.py::plot_pivots` (mplfinance candlesticks + pivot markers, Agg backend) ahead of schedule (originally §10) since it was the fastest way to visually verify pivot detection. |
 | 2026-09-11 | Project scaffolded: `git init`; `uv init --app --package` (Python 3.11, `uv_build` backend); runtime deps (pandas, numpy, scipy, pydantic, pyyaml, typer, matplotlib, mplfinance, pyarrow) added, `dev` group (pytest, pytest-cov, ruff, mypy) added, `ml` extra (scikit-learn, xgboost, lightgbm) registered but not installed. `src/chart_patterns/` created with one subpackage per pipeline stage (§3). Added `src/chart_patterns/paths.py` (`PROJECT_ROOT`, resolved by walking up to the nearest `pyproject.toml`) so relocated modules keep resolving `data/`/`output/` at the repo root regardless of package depth. Moved `candle_db.py` → `src/chart_patterns/data/candle_db.py` and `custom_logger.py` → `src/chart_patterns/custom_logger.py`, updating their path resolution and imports accordingly; verified against the real `data/candles.db` post-move. Added starter YAML configs (§6) and a pytest smoke test. Ruff configured with `select = ["E", "F", "I"]` (not the full opinionated default) and `line-length = 120`, with a per-file `E501` ignore for `candle_db.py` — its blind-except/naive-datetime patterns and long lines are pre-existing, intentional choices in provided code, not addressed by scaffolding. Fixed a real gitignore gap: the `data/*.db` pattern missed the 266MB `candles.db.2023_2025` backup (doesn't end in `.db`); changed to `data/*.db*`. |

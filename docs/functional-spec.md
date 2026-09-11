@@ -33,9 +33,9 @@ in a way that risks dropping true patterns.
 | 2 | Data Ingestion Layer | Not Started |
 | 3 | Smoothing Layer | Not Started |
 | 4 | Pivot / Extrema Detection | Done |
-| 5 | Rule-Based Pattern Matcher Framework | Not Started |
-| 6 | Pattern Implementations | Not Started |
-| 7 | Candidate Scoring & Ranking | Not Started |
+| 5 | Rule-Based Pattern Matcher Framework | In Progress |
+| 6 | Pattern Implementations | In Progress |
+| 7 | Candidate Scoring & Ranking | In Progress |
 | 8 | Backtesting & Validation Framework | Not Started |
 | 9 | Alerting / Output Layer | Not Started |
 | 10 | Visualization & Reporting | In Progress |
@@ -90,11 +90,11 @@ in a way that risks dropping true patterns.
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 5.1 | Define common pattern-matcher interface (input: pivot sequence → output: candidates) | Not Started | |
-| 5.2 | Define tolerance/config schema per pattern (height similarity %, time symmetry %, depth ratio, etc.) | Not Started | Must be easy to widen for recall tuning |
-| 5.3 | Define candidate pattern data model (pattern type, pivots involved, time span, confidence score, metadata) | Not Started | |
-| 5.4 | Pattern registry so new pattern matchers can be plugged in without touching core pipeline | Not Started | |
-| 5.5 | Overlap/duplicate handling across sliding windows of pivots | Not Started | Same pivots may trigger multiple candidate windows |
+| 5.1 | Define common pattern-matcher interface (input: pivot sequence → output: candidates) | Done | A plain function convention (`(pivots, config) -> list[Candidate]`) rather than a class/Protocol hierarchy — same reasoning as `pivots.detect_pivots`: only one implementation so far, a formal interface would be premature |
+| 5.2 | Define tolerance/config schema per pattern (height similarity %, time symmetry %, depth ratio, etc.) | Done | Built as part of the config loader task (technical-spec §6): `DoubleTopConfig` |
+| 5.3 | Define candidate pattern data model (pattern type, pivots involved, time span, confidence score, metadata) | Done | `patterns/models.py::Candidate` — `start_index`/`end_index`/`start_timestamp`/`end_timestamp` derived as properties from `pivots[0]`/`pivots[-1]` |
+| 5.4 | Pattern registry so new pattern matchers can be plugged in without touching core pipeline | Done | `patterns/registry.py`: `@register_pattern(name)` decorator + `find_candidates(pattern_name, pivots, config)` dispatcher, mirroring the config loader's own per-pattern registry |
+| 5.5 | Overlap/duplicate handling across sliding windows of pivots | Not Started | Deliberately deferred — `find_double_top_candidates` documents that it returns all overlapping matches by design (recall-first); dedup is this task's job, not the matcher's |
 
 ## 6. Pattern Implementations
 
@@ -106,11 +106,11 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 6.1.1 | Encode geometric rule: 2 peaks of similar height separated by a meaningful trough | Not Started | |
-| 6.1.2 | Define tolerances: height-similarity %, min trough depth, max/min time separation | Not Started | |
-| 6.1.3 | Implement confidence score (e.g. based on height-similarity + trough depth) | Not Started | |
-| 6.1.4 | Unit tests with synthetic pivot sequences (clear positives, clear negatives, edge cases) | Not Started | |
-| 6.1.5 | Validate end-to-end on real historical data sample | Not Started | First full pipeline run |
+| 6.1.1 | Encode geometric rule: 2 peaks of similar height separated by a meaningful trough | Done | `patterns/double_top.py::find_double_top_candidates` scans every consecutive (peak, trough, peak) triple |
+| 6.1.2 | Define tolerances: height-similarity %, min trough depth, max/min time separation | Done | `DoubleTopConfig` (task 5.2); values in `configs/patterns/double_top.yaml` |
+| 6.1.3 | Implement confidence score (e.g. based on height-similarity + trough depth) | Done | Weighted average (0.6 height-similarity + 0.4 trough-depth, depth capped once ≥2× the minimum); see `docs/pivot-detection.md`-style walkthrough in code comments |
+| 6.1.4 | Unit tests with synthetic pivot sequences (clear positives, clear negatives, edge cases) | Done | `tests/unit/test_double_top.py` — height/depth/time-separation rejections, non-peak-trough-peak windows, overlapping-window recall behavior, registry dispatch, `Candidate` validation |
+| 6.1.5 | Validate end-to-end on real historical data sample | Done | `tests/integration/test_double_top_pipeline.py` (synthetic OHLCV fixture) plus a manual scan of 200 real symbols from `candle_db` (5,801 candidates found — expected given generous recall-first tolerances) with a QA chart rendered for a real double top instance |
 
 ### 6.2 Double Bottom
 
@@ -160,9 +160,9 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 7.1 | Define per-pattern scoring formula (weighted geometric-closeness metrics) | Not Started | |
-| 7.2 | Normalize scores to a common 0–1 confidence scale across pattern types | Not Started | |
-| 7.3 | Deduplication logic for overlapping candidates (same pivots, multiple pattern types or windows) | Not Started | |
+| 7.1 | Define per-pattern scoring formula (weighted geometric-closeness metrics) | In Progress | Double top's formula done (task 6.1.3); each future pattern needs its own |
+| 7.2 | Normalize scores to a common 0–1 confidence scale across pattern types | In Progress | `Candidate.confidence_score` is `Pydantic`-constrained to `[0, 1]` for every pattern; cross-pattern comparability itself isn't tested yet since only one pattern exists |
+| 7.3 | Deduplication logic for overlapping candidates (same pivots, multiple pattern types or windows) | Not Started | Double top currently emits overlapping candidates untouched (by design — see task 5.5) |
 | 7.4 | Ranking output (sorted candidate list per run) | Not Started | |
 
 ## 8. Backtesting & Validation Framework
@@ -188,7 +188,7 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 10.1 | Chart rendering with detected pivots + pattern overlay for manual QA | In Progress | Pivot overlay done (`viz/charts.py::plot_pivots`, built alongside task 4.4); pattern-span overlay pending pattern matchers |
+| 10.1 | Chart rendering with detected pivots + pattern overlay for manual QA | Done | `viz/charts.py::plot_pivots` now takes an optional `candidates` list and shades each candidate's span with a confidence-labeled annotation; verified on real double-top candidates found in `candle_db` |
 | 10.2 | Per-run summary report (candidates found, scores, pattern breakdown) | Not Started | |
 
 ## 11. ML Scorer (Optional / Future Phase)
@@ -211,4 +211,5 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 | 2026-09-11 | Initial functional specification created. |
 | 2026-09-11 | Project scaffolding complete (task 1.1–1.6): git repo, uv-managed src-layout package, pytest/ruff wired up, starter YAML configs, `candle_db.py`/`custom_logger.py` relocated into the package. See technical-spec for details. |
 | 2026-09-11 | Config loader implemented (task 1.6 → Done): Pydantic-validated loaders for smoothing, logging, and double-top pattern config, with unit tests covering both the real YAML files and validation failure cases. |
+| 2026-09-11 | Double Top pattern matcher implemented (tasks 5.1–5.4, 6.1 → Done): `Candidate` model, pattern registry, `find_double_top_candidates` with a weighted confidence score, unit + integration tests, and a real-data scan (5,801 candidates across 200 symbols at default tolerances) with a QA chart. `plot_pivots` now overlays candidate spans (task 10.1 → Done). Overlapping-candidate dedup (5.5, 7.3) deliberately deferred. |
 | 2026-09-11 | Pivot/extrema detection implemented (task 4 → Done): `zigzag_pivots` (primary/default) and `find_local_extrema` (for future Savgol/kernel-regression smoothers), unified behind `detect_pivots()`; `plot_pivots` QA visualization built alongside (task 10.1, partial). Verified against real `ANIKINDS-BE` history, not just synthetic data. |

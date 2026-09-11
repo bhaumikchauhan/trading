@@ -7,6 +7,7 @@ import mplfinance as mpf
 import numpy as np
 import pandas as pd
 
+from ..patterns.models import Candidate
 from ..pivots.models import Pivot
 
 
@@ -14,14 +15,15 @@ def plot_pivots(
     df: pd.DataFrame,
     pivots: list[Pivot],
     *,
+    candidates: list[Candidate] | None = None,
     title: str | None = None,
     save_path: str | None = None,
 ):
-    """Render a candlestick chart with detected pivots overlaid, for manual QA of
-    pivot detection. `df` must be in the canonical OHLCV shape (DatetimeIndex,
-    lowercase open/high/low/close/volume columns) and `pivots` must have been
-    detected from a series positionally aligned with `df` (each Pivot.index is
-    used as a row position into `df`).
+    """Render a candlestick chart with detected pivots (and, optionally, matched
+    pattern candidates) overlaid, for manual QA. `df` must be in the canonical
+    OHLCV shape (DatetimeIndex, lowercase open/high/low/close/volume columns) and
+    `pivots`/`candidates` must have been detected from a series positionally
+    aligned with `df` (each Pivot.index is used as a row position into `df`).
     """
     plot_df = df.rename(columns=str.capitalize)[["Open", "High", "Low", "Close", "Volume"]]
 
@@ -45,14 +47,27 @@ def plot_pivots(
             )
         )
 
-    fig, _ = mpf.plot(
-        plot_df,
-        type="candle",
-        style="yahoo",
-        addplot=addplots or None,
-        title=title,
-        returnfig=True,
-    )
+    plot_kwargs = {"type": "candle", "style": "yahoo", "addplot": addplots or None}
+    if title is not None:
+        plot_kwargs["title"] = title
+
+    fig, axes = mpf.plot(plot_df, returnfig=True, **plot_kwargs)
+    if candidates:
+        price_ax = axes[0]
+        for candidate in candidates:
+            price_ax.axvspan(
+                candidate.start_index, candidate.end_index, color="orange", alpha=0.15
+            )
+            price_ax.annotate(
+                f"{candidate.pattern_type} ({candidate.confidence_score:.2f})",
+                xy=((candidate.start_index + candidate.end_index) / 2, candidate.pivots[0].price),
+                xytext=(0, 10),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                color="darkorange",
+            )
+
     if save_path:
         fig.savefig(save_path)
     plt.close(fig)
