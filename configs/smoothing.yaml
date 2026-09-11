@@ -1,0 +1,6 @@
+zigzag:
+  threshold_pct: 3.0
+
+savgol:
+  window_length: 11
+  polyorder: 2

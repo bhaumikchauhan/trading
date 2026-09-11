@@ -1,0 +1,5 @@
+double_top:
+  height_similarity_pct: 3.0      # max % difference allowed between the two peaks
+  min_trough_depth_pct: 2.0       # trough must retrace at least this % from peak
+  max_time_separation_bars: 120   # widen for recall; tighten later only via backtest data
+  min_time_separation_bars: 5

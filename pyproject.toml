@@ -1,0 +1,63 @@
+[project]
+name = "chart-patterns"
+version = "0.1.0"
+description = "Rule-based (and eventually ML-assisted) technical chart pattern detection over OHLCV data"
+readme = "README.md"
+authors = [
+    { name = "bhaumikchauhan", email = "bhaumik_chauhan@yahoo.co.in" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "mplfinance>=0.12.10b0",
+    "numpy>=2.4.6",
+    "pandas>=3.0.5",
+    "pyarrow>=25.0.1",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+    "scipy>=1.17.1",
+    "typer>=0.27.2",
+]
+
+[project.scripts]
+chart-patterns = "chart_patterns:main"
+
+[project.optional-dependencies]
+ml = [
+    "lightgbm>=4.7.0",
+    "scikit-learn>=1.9.1",
+    "xgboost>=3.2.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src"]
+
+[tool.ruff.lint]
+# Default set (E, F) plus import sorting. Stricter opinionated rules (e.g. blind-except,
+# naive-datetime) are left off for now — candle_db.py's defensive broad excepts around
+# messy market data are intentional, not scaffolding-scope cleanup.
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Provided as-is; not reformatted to this project's line-length as part of scaffolding.
+"src/chart_patterns/data/candle_db.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

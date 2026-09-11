@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Local databases and generated data/logs — regenerated or provided separately, not committed
+data/*.db*
+data/cache/
+output/
+
+# Personal-machine Claude Code settings
+.claude/settings.local.json
