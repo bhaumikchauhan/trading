@@ -52,7 +52,7 @@ in a way that risks dropping true patterns.
 | 1.3 | Dependency management setup (env/package manager) | Done | `uv`; `pyproject.toml` with runtime deps, `dev` dependency group, and a deferred `ml` optional-dependency group (not installed until Phase 2) |
 | 1.4 | Testing framework setup | Done | `pytest` wired via `[tool.pytest.ini_options]`; smoke test passing (`tests/unit/test_project_setup.py`) |
 | 1.5 | Logging setup | Done | Reusing provided `custom_logger.py` singleton logger (see technical-spec §11) rather than a new logging stack; two minor cleanup items tracked in technical-spec's Open Decisions |
-| 1.6 | Config management for tunable parameters (smoothing thresholds, pattern tolerances) | In Progress | Starter YAML files created (`configs/smoothing.yaml`, `configs/patterns/double_top.yaml`, `configs/logging.yaml`); Pydantic loader/validation code not yet written |
+| 1.6 | Config management for tunable parameters (smoothing thresholds, pattern tolerances) | Done | `src/chart_patterns/config/`: Pydantic models (`SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`) + loaders reading the YAML files, with validation (e.g. odd Savitzky-Golay window, ordered time-separation bounds, positive tolerances). A small per-pattern model registry mirrors the pattern-matcher registry planned for §9 of the technical doc |
 | 1.7 | CI setup (lint + test on push) | Not Started | `ruff` + `pytest` run clean locally; no CI workflow file yet |
 
 ## 2. Data Ingestion Layer
@@ -210,3 +210,4 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 |---|---|
 | 2026-09-11 | Initial functional specification created. |
 | 2026-09-11 | Project scaffolding complete (task 1.1–1.6): git repo, uv-managed src-layout package, pytest/ruff wired up, starter YAML configs, `candle_db.py`/`custom_logger.py` relocated into the package. See technical-spec for details. |
+| 2026-09-11 | Config loader implemented (task 1.6 → Done): Pydantic-validated loaders for smoothing, logging, and double-top pattern config, with unit tests covering both the real YAML files and validation failure cases. |
