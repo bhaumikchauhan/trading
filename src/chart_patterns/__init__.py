@@ -1,2 +1,4 @@
 def main() -> None:
-    print("Hello from chart-patterns!")
+    from .cli import app
+
+    app()

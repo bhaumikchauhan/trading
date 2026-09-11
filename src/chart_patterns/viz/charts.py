@@ -47,7 +47,14 @@ def plot_pivots(
             )
         )
 
-    plot_kwargs = {"type": "candle", "style": "yahoo", "addplot": addplots or None}
+    plot_kwargs = {
+        "type": "candle",
+        "style": "yahoo",
+        "addplot": addplots or None,
+        # This project's charts are routinely multi-year daily history; mplfinance's
+        # density warning would fire on nearly every real (non-test) call otherwise.
+        "warn_too_much_data": len(plot_df) + 1,
+    }
     if title is not None:
         plot_kwargs["title"] = title
 

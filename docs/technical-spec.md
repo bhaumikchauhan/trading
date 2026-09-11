@@ -386,9 +386,32 @@ mypy rejecting the registration on parameter-type variance grounds.
   commands will be invoked often during development, so `output/` will
   accumulate many small log files unless a retention/cleanup convention is
   added later.
-- `typer` CLI exposes: `run` (execute pipeline for a symbol/date range, print or
-  save ranked candidates), `backtest` (run the evaluation harness), `plot`
-  (render a chart with pivots/candidate overlays for manual QA).
+- `typer` CLI, `src/chart_patterns/cli/main.py`, entry point `chart-patterns`
+  (`pyproject.toml` `[project.scripts]` → `chart_patterns:main` →
+  `cli.app()`). One command implemented so far:
+  - `scan SYMBOL... [--start] [--end] [--pattern] [--min-confidence] [--save-charts]`
+    — runs `zigzag_pivots` + `find_candidates` against real `candle_db` data per
+    symbol, prints each candidate's pivots/metrics/confidence to console (sorted
+    highest-confidence first), and saves a `plot_pivots` QA chart to
+    `output/charts/<symbol>_<pattern>.png`. This is a manual-verification tool
+    (functional-spec 9.2), not the labeled-dataset `backtest` harness planned
+    for functional-spec §8 — deliberately not named `backtest` to avoid
+    implying it computes precision/recall against ground truth, which it
+    doesn't (there is no labeled dataset yet).
+  - Still planned, not yet built: a `backtest` command once §8's labeled
+    dataset and evaluation harness exist, and a standalone `plot` command
+    (currently `scan`'s `--save-charts` covers this need).
+  - **Typer gotcha hit in practice:** a `Typer()` app with exactly one
+    `@app.command()` and no `@app.callback()` auto-flattens — it silently
+    accepts the command name as a positional argument instead of dispatching
+    to it (`chart-patterns scan RELIANCE` would treat `"scan"` as a symbol).
+    Fixed by adding a no-op `@app.callback()`, which forces Typer to keep
+    requiring the subcommand name. This will matter again if a second command
+    is ever removed and one is left alone.
+  - `plot_pivots` passes `warn_too_much_data=len(plot_df) + 1` to `mpf.plot` —
+    without it, mplfinance's density warning fires on nearly every real
+    (non-test) call, since this project's charts are routinely multi-year
+    daily history.
 
 ## 12. Backtesting & Metrics
 
@@ -443,6 +466,7 @@ mypy rejecting the registration on parameter-type variance grounds.
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-11 | `chart-patterns scan` CLI added (§11) for manually verifying pattern matches against real `candle_db` data: prints ranked candidates with full pivot/metric detail, saves a QA chart per symbol. Hit and fixed a real Typer gotcha (single-command apps auto-flatten and swallow the subcommand name unless a `@app.callback()` is present) and suppressed mplfinance's too-much-data warning (routine at this project's multi-year chart sizes) via `warn_too_much_data`. |
 | 2026-09-11 | Double Top pattern matcher implemented (§9): `patterns/models.py::Candidate`, `patterns/registry.py` (`register_pattern`/`find_candidates`), `patterns/double_top.py::find_double_top_candidates` (0.6 height-similarity / 0.4 trough-depth weighted confidence score). Ended up function+dict-registry, not the `Protocol` class originally sketched here — same rationale as `pivots.detect_pivots`. `plot_pivots` extended with an optional `candidates` overlay. Verified against a synthetic integration fixture and, manually, against 200 real symbols from `candle_db` (5,801 candidates at the default generous tolerances) with a QA chart rendered for a real instance. Along the way, fixed a real bug: `plot_pivots(title=None)` crashed because `mpf.plot` rejects `title=None` outright (needs the kwarg omitted, not set to `None`) — only surfaced once a test called `plot_pivots` without an explicit title. |
 | 2026-09-11 | Added [pivot-detection.md](pivot-detection.md), a detailed implementation deep-dive (algorithm walkthroughs, a hand-traced worked example, every class/function, edge cases) for `pivots/` and `viz/charts.py`. |
 | 2026-09-11 | Pivot detection implemented in `src/chart_patterns/pivots/`: `zigzag.py` (`zigzag_pivots`, the default threshold-based method, hand-traced and verified against real `ANIKINDS-BE` history), `extrema.py` (`find_local_extrema` via `scipy.signal.argrelextrema`, plus `_enforce_alternation` for the consecutive-same-type edge case, for future Savgol/kernel-regression smoothers), `models.py` (`Pivot`), unified via `detector.py::detect_pivots()`. Revised §8's pipeline diagram and added a rationale note: ZigZag is implemented directly under `pivots/` rather than `smoothing/`, since it has no separate continuous output distinct from its pivots. Also added `viz/charts.py::plot_pivots` (mplfinance candlesticks + pivot markers, Agg backend) ahead of schedule (originally §10) since it was the fastest way to visually verify pivot detection. |

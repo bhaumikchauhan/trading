@@ -37,7 +37,7 @@ in a way that risks dropping true patterns.
 | 6 | Pattern Implementations | In Progress |
 | 7 | Candidate Scoring & Ranking | In Progress |
 | 8 | Backtesting & Validation Framework | Not Started |
-| 9 | Alerting / Output Layer | Not Started |
+| 9 | Alerting / Output Layer | In Progress |
 | 10 | Visualization & Reporting | In Progress |
 | 11 | ML Scorer (Optional / Future Phase) | Not Started |
 
@@ -180,7 +180,7 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
 | 9.1 | Define alert data model and ranked-output format (JSON/CSV) | Not Started | |
-| 9.2 | Output sink: console/file | Not Started | First target |
+| 9.2 | Output sink: console/file | In Progress | `cli/main.py::scan` prints ranked `Candidate`s with full pivot detail to console — a manual-verification tool, not yet the formal `Alert` model/ranked-output format from task 9.1 |
 | 9.3 | Output sink: webhook/email/Slack | Not Started | Later, once core detection is solid |
 | 9.4 | Deduplication/cooldown so the same pattern instance doesn't re-alert every bar | Not Started | |
 
@@ -211,5 +211,6 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 | 2026-09-11 | Initial functional specification created. |
 | 2026-09-11 | Project scaffolding complete (task 1.1–1.6): git repo, uv-managed src-layout package, pytest/ruff wired up, starter YAML configs, `candle_db.py`/`custom_logger.py` relocated into the package. See technical-spec for details. |
 | 2026-09-11 | Config loader implemented (task 1.6 → Done): Pydantic-validated loaders for smoothing, logging, and double-top pattern config, with unit tests covering both the real YAML files and validation failure cases. |
+| 2026-09-11 | Added `chart-patterns scan SYMBOL... [--start] [--end] [--pattern] [--min-confidence]` CLI (task 9.2, in progress): runs the real pipeline against `candle_db`, prints ranked candidates with full pivot/metric detail for manual verification, and saves a QA chart per symbol. This is a manual-verification tool, not the labeled-dataset backtest harness in task 8. |
 | 2026-09-11 | Double Top pattern matcher implemented (tasks 5.1–5.4, 6.1 → Done): `Candidate` model, pattern registry, `find_double_top_candidates` with a weighted confidence score, unit + integration tests, and a real-data scan (5,801 candidates across 200 symbols at default tolerances) with a QA chart. `plot_pivots` now overlays candidate spans (task 10.1 → Done). Overlapping-candidate dedup (5.5, 7.3) deliberately deferred. |
 | 2026-09-11 | Pivot/extrema detection implemented (task 4 → Done): `zigzag_pivots` (primary/default) and `find_local_extrema` (for future Savgol/kernel-regression smoothers), unified behind `detect_pivots()`; `plot_pivots` QA visualization built alongside (task 10.1, partial). Verified against real `ANIKINDS-BE` history, not just synthetic data. |
