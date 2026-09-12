@@ -421,15 +421,43 @@ mypy rejecting the registration on parameter-type variance grounds.
 - `typer` CLI, `src/chart_patterns/cli/main.py`, entry point `chart-patterns`
   (`pyproject.toml` `[project.scripts]` → `chart_patterns:main` →
   `cli.app()`). One command implemented so far:
-  - `scan SYMBOL... [--start] [--end] [--pattern] [--min-confidence] [--save-charts]`
+  - `scan [SYMBOL...] [--all-symbols] [--start] [--end] [--pattern] [--min-confidence] [--save-charts] [--save-csv] [--quiet]`
     — runs `zigzag_pivots` + `find_candidates` against real `candle_db` data per
     symbol, prints each candidate's pivots/metrics/confidence to console (sorted
-    highest-confidence first), and saves a `plot_pivots` QA chart to
-    `output/charts/<symbol>_<pattern>.png`. This is a manual-verification tool
-    (functional-spec 9.2), not the labeled-dataset `backtest` harness planned
-    for functional-spec §8 — deliberately not named `backtest` to avoid
-    implying it computes precision/recall against ground truth, which it
-    doesn't (there is no labeled dataset yet).
+    highest-confidence first, grouped by pattern), saves a `plot_pivots` QA
+    chart, and writes every result to CSV under `output/scans/`. This is a
+    manual-verification tool (functional-spec 9.2), not the labeled-dataset
+    `backtest` harness planned for functional-spec §8 — deliberately not named
+    `backtest` to avoid implying it computes precision/recall against ground
+    truth, which it doesn't (there is no labeled dataset yet).
+  - `SYMBOL...` is optional; `--all-symbols` loads every symbol from
+    `data/all_symbols.csv` (2,729 symbols) instead. A full-universe scan for one
+    pattern with `--no-save-charts` completes in ~9s — no need for the
+    `memory=True` `candle_db` acceleration mode (§5.1) at this scale; revisit if
+    scanning `--pattern all` or many patterns across the full universe proves
+    slow in practice.
+  - `--pattern all` scans every pattern the registry knows about
+    (`patterns.list_registered_patterns()`, new — a thin `sorted(_PATTERN_MATCHERS)`
+    wrapper) instead of one. Pivots are computed once per symbol and reused
+    across patterns; console output and the QA chart group/aggregate across all
+    scanned patterns for that symbol.
+  - `--quiet` prints one summary line per symbol (bars/pivots/candidate counts
+    per pattern) instead of full per-candidate detail — necessary once
+    `--all-symbols` is combined with `--pattern all`, or console output for a
+    2,729-symbol run becomes unusable. Full detail is always in the CSV
+    regardless of `--quiet`.
+  - CSV output: one row per candidate
+    (`symbol, pattern, candidate_number, confidence_score, start_date, end_date,
+    pivots, metrics`), `pivots`/`metrics` flattened to a single delimited string
+    each rather than variable-width columns (different patterns have different
+    pivot counts — 3 for double top/bottom, 5 for head and shoulders). Filename
+    is `<symbol-or-N>_<pattern-or-mul_pattern>.csv` under `output/scans/`: the
+    first segment is the literal symbol when exactly one was scanned, or the
+    symbol *count* otherwise; the second is the pattern name when exactly one
+    was scanned, or the literal `mul_pattern` otherwise. Per-symbol chart
+    filenames follow the same `mul_pattern` convention for the second segment
+    but always use the literal symbol for the first (one chart is always one
+    symbol, so there's never a count to substitute there).
   - Still planned, not yet built: a `backtest` command once §8's labeled
     dataset and evaluation harness exist, and a standalone `plot` command
     (currently `scan`'s `--save-charts` covers this need).
@@ -498,6 +526,7 @@ mypy rejecting the registration on parameter-type variance grounds.
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-12 | `scan` CLI extended (§11): `--all-symbols` (`data/all_symbols.csv`, 2,729 symbols, ~9s full-universe single-pattern scan with `--no-save-charts`), `--pattern all` via new `patterns.list_registered_patterns()`, CSV output under `output/scans/` (`<symbol-or-N>_<pattern-or-mul_pattern>.csv`), `--quiet`. Added `tests/unit/test_cli.py` for the pure-logic pieces (filename-stem convention, symbol-file parsing, pivot/metric string formatting) — the `scan` command itself still isn't unit-tested since it depends on the real `candle_db`, consistent with §10's stated approach of manual verification for DB-dependent behavior. |
 | 2026-09-12 | Double Bottom and Head and Shoulders pattern matchers added (§9.1): `DoubleBottomConfig`/`HeadAndShouldersConfig`, `configs/patterns/{double_bottom,head_and_shoulders}.yaml`, both registered and covered by unit tests plus a real-data `chart-patterns scan` check. Double Bottom implemented as an independent mirror rather than a price-negation trick (negation breaks the percentage math); Head and Shoulders deliberately has no time-symmetry constraint between its two halves. |
 | 2026-09-11 | `chart-patterns scan` CLI added (§11) for manually verifying pattern matches against real `candle_db` data: prints ranked candidates with full pivot/metric detail, saves a QA chart per symbol. Hit and fixed a real Typer gotcha (single-command apps auto-flatten and swallow the subcommand name unless a `@app.callback()` is present) and suppressed mplfinance's too-much-data warning (routine at this project's multi-year chart sizes) via `warn_too_much_data`. |
 | 2026-09-11 | Double Top pattern matcher implemented (§9): `patterns/models.py::Candidate`, `patterns/registry.py` (`register_pattern`/`find_candidates`), `patterns/double_top.py::find_double_top_candidates` (0.6 height-similarity / 0.4 trough-depth weighted confidence score). Ended up function+dict-registry, not the `Protocol` class originally sketched here — same rationale as `pivots.detect_pivots`. `plot_pivots` extended with an optional `candidates` overlay. Verified against a synthetic integration fixture and, manually, against 200 real symbols from `candle_db` (5,801 candidates at the default generous tolerances) with a QA chart rendered for a real instance. Along the way, fixed a real bug: `plot_pivots(title=None)` crashed because `mpf.plot` rejects `title=None` outright (needs the kwarg omitted, not set to `None`) — only surfaced once a test called `plot_pivots` without an explicit title. |

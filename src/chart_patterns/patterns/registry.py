@@ -28,3 +28,7 @@ def find_candidates(pattern_name: str, pivots: list[Pivot], config: Any) -> list
             f"Known patterns: {sorted(_PATTERN_MATCHERS)}"
         )
     return _PATTERN_MATCHERS[pattern_name](pivots, config)
+
+
+def list_registered_patterns() -> list[str]:
+    return sorted(_PATTERN_MATCHERS)

@@ -2,7 +2,7 @@ from .double_bottom import find_double_bottom_candidates
 from .double_top import find_double_top_candidates
 from .head_and_shoulders import find_head_and_shoulders_candidates
 from .models import Candidate
-from .registry import find_candidates, register_pattern
+from .registry import find_candidates, list_registered_patterns, register_pattern
 
 __all__ = [
     "Candidate",
@@ -10,5 +10,6 @@ __all__ = [
     "find_double_bottom_candidates",
     "find_double_top_candidates",
     "find_head_and_shoulders_candidates",
+    "list_registered_patterns",
     "register_pattern",
 ]
