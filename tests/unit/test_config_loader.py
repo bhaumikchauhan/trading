@@ -2,7 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from chart_patterns.config import (
+    DoubleBottomConfig,
     DoubleTopConfig,
+    HeadAndShouldersConfig,
     load_logging_config,
     load_pattern_config,
     load_smoothing_config,
@@ -26,6 +28,20 @@ def test_load_double_top_config_from_real_file():
     config = load_pattern_config("double_top")
     assert isinstance(config, DoubleTopConfig)
     assert config.height_similarity_pct == 3.0
+    assert config.min_time_separation_bars < config.max_time_separation_bars
+
+
+def test_load_double_bottom_config_from_real_file():
+    config = load_pattern_config("double_bottom")
+    assert isinstance(config, DoubleBottomConfig)
+    assert config.depth_similarity_pct == 3.0
+    assert config.min_time_separation_bars < config.max_time_separation_bars
+
+
+def test_load_head_and_shoulders_config_from_real_file():
+    config = load_pattern_config("head_and_shoulders")
+    assert isinstance(config, HeadAndShouldersConfig)
+    assert config.shoulder_height_similarity_pct == 5.0
     assert config.min_time_separation_bars < config.max_time_separation_bars
 
 

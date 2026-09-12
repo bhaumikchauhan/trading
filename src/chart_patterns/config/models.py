@@ -45,3 +45,30 @@ class DoubleTopConfig(BaseModel):
         if self.min_time_separation_bars >= self.max_time_separation_bars:
             raise ValueError("min_time_separation_bars must be less than max_time_separation_bars")
         return self
+
+
+class DoubleBottomConfig(BaseModel):
+    depth_similarity_pct: float = Field(gt=0)
+    min_peak_prominence_pct: float = Field(gt=0)
+    max_time_separation_bars: int = Field(gt=0)
+    min_time_separation_bars: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def check_time_separation_order(self) -> "DoubleBottomConfig":
+        if self.min_time_separation_bars >= self.max_time_separation_bars:
+            raise ValueError("min_time_separation_bars must be less than max_time_separation_bars")
+        return self
+
+
+class HeadAndShouldersConfig(BaseModel):
+    shoulder_height_similarity_pct: float = Field(gt=0)
+    min_head_prominence_pct: float = Field(gt=0)
+    max_neckline_slope_pct: float = Field(gt=0)
+    max_time_separation_bars: int = Field(gt=0)
+    min_time_separation_bars: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def check_time_separation_order(self) -> "HeadAndShouldersConfig":
+        if self.min_time_separation_bars >= self.max_time_separation_bars:
+            raise ValueError("min_time_separation_bars must be less than max_time_separation_bars")
+        return self

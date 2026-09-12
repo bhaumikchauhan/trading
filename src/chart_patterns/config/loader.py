@@ -4,7 +4,13 @@ import yaml
 from pydantic import BaseModel
 
 from ..paths import PROJECT_ROOT
-from .models import DoubleTopConfig, LoggingConfig, SmoothingConfig
+from .models import (
+    DoubleBottomConfig,
+    DoubleTopConfig,
+    HeadAndShouldersConfig,
+    LoggingConfig,
+    SmoothingConfig,
+)
 
 CONFIG_DIR = PROJECT_ROOT / "configs"
 
@@ -13,6 +19,8 @@ CONFIG_DIR = PROJECT_ROOT / "configs"
 # technical-spec §9.
 _PATTERN_CONFIG_MODELS: dict[str, type[BaseModel]] = {
     "double_top": DoubleTopConfig,
+    "double_bottom": DoubleBottomConfig,
+    "head_and_shoulders": HeadAndShouldersConfig,
 }
 
 

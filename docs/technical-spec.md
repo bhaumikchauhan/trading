@@ -355,6 +355,38 @@ mypy rejecting the registration on parameter-type variance grounds.
   found in real `candle_db` data were visually verified (functional-spec 6.1.5,
   10.1).
 
+### 9.1 Double Bottom and Head and Shoulders (added after Double Top)
+
+- **Double Bottom is not implemented as "double top on negated prices."**
+  Functional-spec 6.2.1 suggested reuse via inversion, but negating prices
+  breaks the percentage-difference math every matcher relies on (percentages
+  are computed against a positive-price denominator; negating flips signs
+  inconsistently rather than just mirroring the comparison). Instead,
+  `double_bottom.py::find_double_bottom_candidates` is a structurally parallel,
+  independent function — same shape of logic (3-pivot window, two filters, a
+  weighted confidence score), mirrored by hand: `depth_similarity_pct` instead
+  of `height_similarity_pct`, `min_peak_prominence_pct` instead of
+  `min_trough_depth_pct`. This also keeps each pattern independently readable
+  and testable, consistent with the one-file-per-pattern registry design.
+- **Head and Shoulders** extends the same 3-pivot-window idea to a 5-pivot
+  window (`peak, trough, peak, trough, peak`) with three independent
+  geometric checks — head prominence over the higher shoulder, shoulder-height
+  similarity, and neckline slope (the two troughs' price difference, not a
+  fitted line — see functional-spec 6.3.3) — combined into confidence via a
+  0.4/0.35/0.25 weighting (shoulder symmetry weighted highest since it's the
+  most visually defining trait, neckline flatness lowest since it's the most
+  secondary confirmation). It deliberately does **not** require the left and
+  right halves to span similar bar-counts — real head and shoulders patterns
+  are routinely asymmetric in time even when symmetric in price, and adding a
+  symmetry constraint would cost recall for no accuracy benefit backed by the
+  pattern's actual definition.
+- Both were verified the same way as Double Top: unit tests with hand-built
+  pivot sequences isolating each rejection rule, plus a real-data check via
+  `chart-patterns scan --pattern double_bottom` / `--pattern head_and_shoulders`
+  against `candle_db`. A zoomed-in QA chart on a real `head_and_shoulders`
+  candidate (`21STCENMGM`, Feb–Apr 2021) showed a textbook shape — sharp head
+  well above two roughly-matched shoulders, near-flat neckline.
+
 ## 10. Testing Strategy
 
 | Level | Approach |
@@ -466,6 +498,7 @@ mypy rejecting the registration on parameter-type variance grounds.
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-12 | Double Bottom and Head and Shoulders pattern matchers added (§9.1): `DoubleBottomConfig`/`HeadAndShouldersConfig`, `configs/patterns/{double_bottom,head_and_shoulders}.yaml`, both registered and covered by unit tests plus a real-data `chart-patterns scan` check. Double Bottom implemented as an independent mirror rather than a price-negation trick (negation breaks the percentage math); Head and Shoulders deliberately has no time-symmetry constraint between its two halves. |
 | 2026-09-11 | `chart-patterns scan` CLI added (§11) for manually verifying pattern matches against real `candle_db` data: prints ranked candidates with full pivot/metric detail, saves a QA chart per symbol. Hit and fixed a real Typer gotcha (single-command apps auto-flatten and swallow the subcommand name unless a `@app.callback()` is present) and suppressed mplfinance's too-much-data warning (routine at this project's multi-year chart sizes) via `warn_too_much_data`. |
 | 2026-09-11 | Double Top pattern matcher implemented (§9): `patterns/models.py::Candidate`, `patterns/registry.py` (`register_pattern`/`find_candidates`), `patterns/double_top.py::find_double_top_candidates` (0.6 height-similarity / 0.4 trough-depth weighted confidence score). Ended up function+dict-registry, not the `Protocol` class originally sketched here — same rationale as `pivots.detect_pivots`. `plot_pivots` extended with an optional `candidates` overlay. Verified against a synthetic integration fixture and, manually, against 200 real symbols from `candle_db` (5,801 candidates at the default generous tolerances) with a QA chart rendered for a real instance. Along the way, fixed a real bug: `plot_pivots(title=None)` crashed because `mpf.plot` rejects `title=None` outright (needs the kwarg omitted, not set to `None`) — only surfaced once a test called `plot_pivots` without an explicit title. |
 | 2026-09-11 | Added [pivot-detection.md](pivot-detection.md), a detailed implementation deep-dive (algorithm walkthroughs, a hand-traced worked example, every class/function, edge cases) for `pivots/` and `viz/charts.py`. |

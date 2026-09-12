@@ -1,0 +1,5 @@
+double_bottom:
+  depth_similarity_pct: 3.0        # max % difference allowed between the two troughs
+  min_peak_prominence_pct: 2.0     # middle peak must rise at least this % above the shallower trough
+  max_time_separation_bars: 120    # widen for recall; tighten later only via backtest data
+  min_time_separation_bars: 5
