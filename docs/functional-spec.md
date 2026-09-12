@@ -62,7 +62,7 @@ in a way that risks dropping true patterns.
 | 2.1 | Define OHLCV schema/interface (timestamp, open, high, low, close, volume) | Not Started | |
 | 2.2 | Implement historical data loader (CSV/local file) | Not Started | First adapter — needed for backtesting |
 | 2.3 | Implement live/streaming market feed adapter | Not Started | Deferred until historical pipeline works |
-| 2.4 | Data validation (gaps, duplicate timestamps, missing bars, non-monotonic time) | Not Started | |
+| 2.4 | Data validation (gaps, duplicate timestamps, missing bars, non-monotonic time) | Not Started | Should also catch bad OHLC bars, not just timestamp issues — confirmed real example: `NIFTYBEES` 2022-01-17 has `open=223.00, high=223.00` vs `close=198.03` (~12% gap, no similar move on adjacent days), almost certainly a bad tick. Harmless to pattern detection today since matchers use `close` only, but would corrupt any future high/low-based check (e.g. cup-and-handle shape fitting) |
 | 2.5 | Multi-timeframe support (resampling e.g. 1m → 1h/1d) | Not Started | |
 | 2.6 | Historical data caching/storage format | Not Started | |
 
