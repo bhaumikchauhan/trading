@@ -2,5 +2,5 @@ head_and_shoulders:
   shoulder_height_similarity_pct: 5.0   # max % difference allowed between the two shoulder peaks
   min_head_prominence_pct: 3.0          # head must rise at least this % above the higher shoulder
   max_neckline_slope_pct: 5.0           # max % difference allowed between the two neckline troughs
-  max_time_separation_bars: 180         # widen for recall; tighten later only via backtest data
+  max_time_separation_bars: 252         # ~1 trading year; widen for recall; tighten later only via backtest data
   min_time_separation_bars: 10
