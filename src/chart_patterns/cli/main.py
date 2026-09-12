@@ -4,6 +4,7 @@ from pathlib import Path
 import typer
 
 from ..config import load_pattern_config, load_smoothing_config
+from ..custom_logger import logger
 from ..data import candle_db
 from ..paths import PROJECT_ROOT
 from ..patterns import Candidate, find_candidates, list_registered_patterns
@@ -103,8 +104,11 @@ def scan(
     charts_dir = PROJECT_ROOT / "output" / "charts"
     csv_dir = PROJECT_ROOT / "output" / "scans"
     csv_rows: list[dict] = []
+    total_symbols = len(resolved_symbols)
+    pattern_candidate_counts: dict[str, int] = dict.fromkeys(patterns_to_scan, 0)
 
-    for symbol in resolved_symbols:
+    for symbol_idx, symbol in enumerate(resolved_symbols, start=1):
+        logger.info(f"Scanning {symbol_idx}/{total_symbols}: {symbol}")
         df = candle_db.get_history(symbol, start=start, end=end)
         if df.empty:
             typer.echo(f"\n{symbol}: no data found")
@@ -123,6 +127,7 @@ def scan(
             ]
             candidates.sort(key=lambda c: c.confidence_score, reverse=True)
             chart_candidates.extend(candidates)
+            pattern_candidate_counts[pat] += len(candidates)
 
             typer.echo(f"  [{pat}] {len(candidates)} candidate(s)")
             for i, candidate in enumerate(candidates, start=1):
@@ -152,6 +157,12 @@ def scan(
                 df, pivots, candidates=chart_candidates, title=stem, save_path=str(save_path)
             )
             typer.echo(f"  chart saved: {save_path}")
+
+    counts_str = ", ".join(f"{p}={c}" for p, c in pattern_candidate_counts.items())
+    logger.info(
+        f"Scan summary: {counts_str} (total={sum(pattern_candidate_counts.values())} "
+        f"candidates across {total_symbols} symbol(s))"
+    )
 
     if save_csv:
         csv_dir.mkdir(parents=True, exist_ok=True)
