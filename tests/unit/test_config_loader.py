@@ -9,12 +9,14 @@ from chart_patterns.config import (
     load_pattern_config,
     load_smoothing_config,
 )
-from chart_patterns.config.models import SavgolConfig
+from chart_patterns.config.models import ATRThresholdConfig, SavgolConfig, ZigZagConfig
 
 
 def test_load_smoothing_config_from_real_file():
     config = load_smoothing_config()
+    assert config.zigzag.method == "fixed"
     assert config.zigzag.threshold_pct == 3.0
+    assert config.zigzag.atr.period == 14
     assert config.savgol.window_length == 11
     assert config.savgol.polyorder == 2
 
@@ -78,3 +80,21 @@ def test_savgol_rejects_even_window_length():
 def test_savgol_rejects_polyorder_ge_window_length():
     with pytest.raises(ValidationError, match="polyorder must be less than"):
         SavgolConfig(window_length=5, polyorder=5)
+
+
+def test_zigzag_atr_method_requires_atr_config():
+    with pytest.raises(ValidationError, match="atr config is required"):
+        ZigZagConfig(method="atr", threshold_pct=3.0, atr=None)
+
+
+def test_zigzag_fixed_method_does_not_require_atr_config():
+    config = ZigZagConfig(method="fixed", threshold_pct=3.0)
+    assert config.atr is None
+
+
+def test_zigzag_atr_method_accepts_atr_config():
+    config = ZigZagConfig(
+        method="atr", threshold_pct=3.0, atr=ATRThresholdConfig(period=14, multiplier=2.5)
+    )
+    assert config.atr.period == 14
+    assert config.atr.multiplier == 2.5

@@ -65,7 +65,7 @@ chart_patterns/
 │       ├── __init__.py
 │       ├── config/              # YAML loading + Pydantic validation
 │       ├── data/                 # DataSource interface + adapters, OHLCV model
-│       ├── smoothing/            # Continuous-series smoothers: savgol, kernel_regression (future)
+│       ├── smoothing/            # atr.py (done); savgol, kernel_regression continuous smoothers (future)
 │       ├── pivots/               # Pivot model + all pivot detection: zigzag (default), extrema (§8 note)
 │       ├── patterns/             # Candidate model, registry, one module per pattern (double_top done)
 │       ├── scoring/              # Confidence scoring, ranking, dedup
@@ -238,7 +238,11 @@ double_top:
 ```yaml
 # configs/smoothing.yaml
 zigzag:
-  threshold_pct: 3.0
+  method: fixed        # "fixed" or "atr" — see §8.1
+  threshold_pct: 3.0    # used directly when method: fixed; fallback for method: atr
+  atr:
+    period: 14
+    multiplier: 2.5
 savgol:
   window_length: 11
   polyorder: 2
@@ -248,6 +252,38 @@ Each pattern config maps to a corresponding Pydantic model (e.g.
 `DoubleTopConfig`) so invalid YAML fails fast at load time rather than producing
 silent bad matches. Per functional-spec's recall-first principle, tolerance
 tuning during backtesting (§7) means editing these YAML files, not code.
+
+### 6.1 ATR-Based ZigZag Threshold (`smoothing/atr.py`)
+
+A single global `threshold_pct` miscalibrates across symbols: a stock that
+typically moves 1%/day gets buried in noise-level pivots at a 3% threshold no
+different-looking than a stock that typically moves 5%/day. `atr_threshold_pct(df,
+period, multiplier)` computes a per-symbol threshold instead:
+
+1. `average_true_range(df, period)` — standard rolling-mean True Range (`max(high-low,
+   |high-prev_close|, |low-prev_close|)`, averaged over `period` bars, `min_periods=period`
+   so early bars are `NaN` rather than a misleadingly-partial average).
+2. Convert to a percentage of price (`ATR / close × 100`) and take the **median**
+   across the whole window — not the latest value or the mean — so the
+   threshold reflects the symbol's typical volatility rather than reacting to
+   one recent spike or a single unusually quiet patch.
+3. Multiply by a configurable `multiplier` (default 2.5) to convert "typical
+   bar-to-bar range" into a sensible swing-confirmation threshold.
+
+Verified on real data: `NIFTYBEES` (a low-volatility index ETF) → 4.83%;
+`ANIKINDS-BE`/`E2E` (volatile small-caps) → 13–15%. `zigzag_pivots()` itself is
+completely unchanged — it still just takes one `threshold_pct: float`; ATR only
+changes *how that number is chosen* per symbol, computed once per symbol in
+`cli/main.py::scan` before calling it. If a symbol has fewer bars than the
+configured ATR `period`, `atr_threshold_pct` raises `ValueError` and `scan`
+falls back to `ZigZagConfig.threshold_pct` for that symbol rather than
+crashing or skipping it.
+
+**Explicitly does not address** the non-adjacent/multi-scale pivot matching gap
+(functional-spec §5.6): that problem is *within one symbol* (a stock can have
+both week-scale and multi-month-scale genuine structure at the same time), while
+ATR calibration addresses *between-symbol* miscalibration. They're independent,
+both-useful fixes, not alternatives to each other.
 
 ## 7. Core Domain Models
 
@@ -541,6 +577,7 @@ mypy rejecting the registration on parameter-type variance grounds.
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-12 | ATR-based ZigZag thresholding added (§6.1): `smoothing/atr.py` (`average_true_range`, `atr_threshold_pct`), `ZigZagConfig.method: fixed \| atr` with a `threshold_pct` fallback for thin-history symbols. First real code in `smoothing/`, which previously only had a placeholder `__init__.py`. Wired into `scan`, which now prints the threshold used per symbol. Verified per-symbol calibration on real data; explicitly does not address the separate §5.6 non-adjacent-pivot gap (between-symbol vs. within-symbol problem). |
 | 2026-09-12 | Fixed a real crash found via `scan --all-symbols`: `ABSLLIQUID` (a near-flat liquid fund) hit zero detected pivots, and `plot_pivots` passed `addplot=None` to `mpf.plot`, which rejects it the same way it rejects `title=None`. Both kwargs are now omitted rather than set to `None`; added `test_plot_pivots_handles_zero_pivots` as a regression test. |
 | 2026-09-12 | `scan` gained two `custom_logger` log lines (§11): per-symbol `Scanning i/total` progress and a final `Scan summary` with per-pattern candidate counts — kept deliberately minimal (no per-candidate logging), independent of `--quiet` since logging and console-verbosity are separate concerns. |
 | 2026-09-12 | `scan` CLI extended (§11): `--all-symbols` (`data/all_symbols.csv`, 2,729 symbols, ~9s full-universe single-pattern scan with `--no-save-charts`), `--pattern all` via new `patterns.list_registered_patterns()`, CSV output under `output/scans/` (`<symbol-or-N>_<pattern-or-mul_pattern>.csv`), `--quiet`. Added `tests/unit/test_cli.py` for the pure-logic pieces (filename-stem convention, symbol-file parsing, pivot/metric string formatting) — the `scan` command itself still isn't unit-tested since it depends on the real `candle_db`, consistent with §10's stated approach of manual verification for DB-dependent behavior. |

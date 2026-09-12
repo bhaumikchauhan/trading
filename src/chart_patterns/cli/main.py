@@ -9,6 +9,7 @@ from ..data import candle_db
 from ..paths import PROJECT_ROOT
 from ..patterns import Candidate, find_candidates, list_registered_patterns
 from ..pivots import zigzag_pivots
+from ..smoothing import atr_threshold_pct
 from ..viz import plot_pivots
 
 app = typer.Typer(add_completion=False)
@@ -115,8 +116,18 @@ def scan(
             continue
 
         df = df.set_index("timestamp")[["open", "high", "low", "close", "volume"]]
-        pivots = zigzag_pivots(df["close"], threshold_pct=smoothing_cfg.zigzag.threshold_pct)
-        typer.echo(f"\n{symbol}: {len(df)} bars, {len(pivots)} pivots")
+        threshold_pct = smoothing_cfg.zigzag.threshold_pct
+        if smoothing_cfg.zigzag.method == "atr" and smoothing_cfg.zigzag.atr is not None:
+            try:
+                threshold_pct = atr_threshold_pct(
+                    df,
+                    period=smoothing_cfg.zigzag.atr.period,
+                    multiplier=smoothing_cfg.zigzag.atr.multiplier,
+                )
+            except ValueError:
+                pass  # not enough bars for this symbol — fall back to threshold_pct above
+        pivots = zigzag_pivots(df["close"], threshold_pct=threshold_pct)
+        typer.echo(f"\n{symbol}: {len(df)} bars, {len(pivots)} pivots (threshold={threshold_pct:.2f}%)")
 
         chart_candidates: list[Candidate] = []
         for pat in patterns_to_scan:

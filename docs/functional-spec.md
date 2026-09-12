@@ -31,7 +31,7 @@ in a way that risks dropping true patterns.
 |---|---|---|
 | 1 | Project Infrastructure | In Progress |
 | 2 | Data Ingestion Layer | Not Started |
-| 3 | Smoothing Layer | Not Started |
+| 3 | Smoothing Layer | In Progress |
 | 4 | Pivot / Extrema Detection | Done |
 | 5 | Rule-Based Pattern Matcher Framework | In Progress |
 | 6 | Pattern Implementations | In Progress |
@@ -70,7 +70,7 @@ in a way that risks dropping true patterns.
 
 | # | Sub-task | Status | Notes |
 |---|---|---|---|
-| 3.1 | Implement ZigZag filter with configurable % / ATR-based threshold | Not Started | Primary/default method |
+| 3.1 | Implement ZigZag filter with configurable % / ATR-based threshold | Done | `pivots/zigzag.py::zigzag_pivots` (lives under `pivots/`, not `smoothing/` — see technical-spec §8 rationale). Fixed % via `configs/smoothing.yaml` (`zigzag.method: fixed`); ATR-based via `smoothing/atr.py::atr_threshold_pct` (`zigzag.method: atr`) — computes `multiplier × median(ATR% over the window)` per symbol, so a volatile small-cap and a quiet ETF each get a threshold scaled to their own typical daily range instead of one global %. Verified: `NIFTYBEES` (quiet) → 4.83%, `ANIKINDS-BE`/`E2E` (volatile) → 13–15%. Falls back to `threshold_pct` if a symbol has too little history for the configured ATR period |
 | 3.2 | Implement Savitzky-Golay filter as alternative smoothing strategy | Not Started | Pluggable |
 | 3.3 | Implement kernel regression smoothing (per Lo/Mamaysky/Wang) as alternative | Not Started | Pluggable, lower priority |
 | 3.4 | Smoothing strategy interface so methods are swappable via config | Not Started | |
@@ -95,7 +95,54 @@ in a way that risks dropping true patterns.
 | 5.3 | Define candidate pattern data model (pattern type, pivots involved, time span, confidence score, metadata) | Done | `patterns/models.py::Candidate` — `start_index`/`end_index`/`start_timestamp`/`end_timestamp` derived as properties from `pivots[0]`/`pivots[-1]` |
 | 5.4 | Pattern registry so new pattern matchers can be plugged in without touching core pipeline | Done | `patterns/registry.py`: `@register_pattern(name)` decorator + `find_candidates(pattern_name, pivots, config)` dispatcher, mirroring the config loader's own per-pattern registry |
 | 5.5 | Overlap/duplicate handling across sliding windows of pivots | Not Started | Deliberately deferred — `find_double_top_candidates` documents that it returns all overlapping matches by design (recall-first); dedup is this task's job, not the matcher's |
-| 5.6 | Non-adjacent / multi-scale pivot matching | Not Started | **Confirmed real recall gap**, found manually verifying `E2E`: a genuine head-and-shoulders (`2025-05-23` peak → `2025-07-28` trough → `2025-10-07` peak → `2025-12-29` trough → `2026-02-19` peak, 187 bars) was missed because every matcher only tests *consecutive* pivots at one fixed ZigZag resolution (3%), and this pattern has 8–12 smaller (but individually legitimate ≥3%) swings nested inside each leg. Confirmed the 5 points pass every numeric rule easily (confidence 0.70) when tested in isolation — the sole blocker is adjacency. Tried coarser ZigZag thresholds (5–15%) as a possible fix: none cleanly isolates just these 5 points — some nested swings persist even at 8%, and by 10%+ the algorithm locks onto different points entirely. A real fix needs either (a) matchers that search non-adjacent peaks/troughs within the allowed time span rather than requiring list-adjacency, or (b) scanning multiple ZigZag resolutions and merging results. Affects every pattern (double top/bottom, H&S), not just this one instance |
+| 5.6 | Non-adjacent / multi-scale pivot matching | Not Started | **Confirmed real recall gap** — see case study below. Deferred; ATR-based thresholding (functional-spec §3.1 / technical-spec) is a related but separate fix and does not resolve this |
+
+### 5.6 Case Study: Confirmed Non-Adjacent Pivot Miss on `E2E`
+
+**How it was found:** manually verifying `head_and_shoulders` output via `chart-patterns scan E2E`, a real, visually obvious head-and-shoulders was spotted on the chart that the scanner had not reported as a candidate:
+
+| Role | Date | Price | Type |
+|---|---|---|---|
+| Left shoulder | 2025-05-23 | 299.87 | peak |
+| Left trough (neckline) | 2025-07-28 | 203.27 | trough |
+| Head | 2025-10-07 | 374.35 | peak |
+| Right trough (neckline) | 2025-12-29 | 195.52 | trough |
+| Right shoulder | 2026-02-19 | 296.34 | peak |
+
+**Step 1 — confirm the 5 points are individually valid.** Extracting exactly these 5 pivots (by their bar position) from the real ZigZag(3%) pivot sequence and running `find_head_and_shoulders_candidates` on *just* that 5-element list produces exactly 1 candidate:
+
+```
+confidence = 0.703
+metrics: shoulder_height_diff_pct=1.215, head_prominence_pct=24.84,
+         neckline_slope_pct=3.99, bars_span=187
+```
+
+Every numeric rule passes comfortably (head prominence 24.8% vs. a 3% minimum; shoulders within 1.2% of each other vs. a 5% tolerance; neckline within 4% vs. a 5% tolerance). This rules out a tolerance-tuning problem — the pattern itself is a clean, strong match.
+
+**Step 2 — find why the full scan didn't report it.** Two independent causes, found in this order:
+
+1. `bars_span = 187` exceeded the then-current `max_time_separation_bars = 180` for `head_and_shoulders` — fixed by widening it to 252 (~1 trading year); see the 6.3.2 note and the commit that applied this.
+2. Even after that fix, the candidate still isn't found from the *full* pivot list — because these 5 points are not adjacent in it. Between the 5 anchor pivots, the real ZigZag(3%) sequence for this window contains **8, 12, 6, and 8 additional pivots respectively** (55 pivots total across the full window) — each one a legitimate ≥3% swing (e.g. a mid-decline bounce, a small double-top-shaped blip in September, a consolidation in Jan–Feb), not noise. Every pattern matcher in this project only evaluates *consecutive* entries in the pivot list (`pivots[i:i+5]` for head-and-shoulders, `pivots[i:i+3]` for double top/bottom), so this combination is never even tested, regardless of tolerance settings.
+
+**Step 3 — checked whether a coarser ZigZag threshold fixes it.** If a single larger threshold caused all the nested swings to disappear while preserving these 5 exact points, that would be a simple fix. Testing thresholds from 3% to 15% on the same window:
+
+| Threshold | Total pivots in window | All 5 anchors still present? | Are they consecutive? |
+|---|---|---|---|
+| 3% (default) | 55 | Yes | No |
+| 5% | 29 | Yes | No |
+| 8% | 15 | No (one anchor point shifts to a neighboring bar) | No |
+| 10% | 7 | No | No |
+| 12% | 6 | No | No |
+| 15% | 6 | No | No |
+
+No threshold in this sweep works: at 3–5%, the anchors are present but still buried among nested swings (a real secondary swing in September and another in Jan–Feb persist even at 8%). Past 8%, the algorithm starts anchoring on different nearby bars entirely, since a coarser threshold changes exactly which local extreme gets confirmed. There is no single global threshold that isolates just this pattern.
+
+**Conclusion:** the matchers' "consecutive pivots only" design is a structural recall gap for any real pattern whose legs contain smaller genuine sub-swings — common for patterns spanning many months, and not specific to head-and-shoulders or to this one symbol. Two candidate fix directions were identified (not yet decided between):
+
+- **(a) Non-adjacent matching:** rewrite matchers to search any qualifying peaks/troughs within the allowed time span rather than requiring list-adjacency. Most thorough; a real rewrite of every matcher plus more false-positive risk to manage via tolerances and task 5.5's still-unbuilt dedup.
+- **(b) Multi-resolution scanning:** run pivot detection + matching at several ZigZag thresholds and merge/dedupe results. Reuses every matcher unchanged; cheaper, but the sweep above shows it would not have caught this specific example on its own.
+
+ATR-based per-symbol thresholding (§3.1) was considered as a possible fix and ruled out for this specific problem: it addresses *cross-symbol* miscalibration (stock A is naturally choppier than stock B), not the fact that *one* symbol can have both week-scale and multi-month-scale genuine structure at the same time. It's being implemented anyway as a separate, independently justified improvement.
 
 ## 6. Pattern Implementations
 
@@ -212,6 +259,8 @@ synthetic-data unit tests → tolerance tuning against labeled data → confiden
 | 2026-09-11 | Initial functional specification created. |
 | 2026-09-11 | Project scaffolding complete (task 1.1–1.6): git repo, uv-managed src-layout package, pytest/ruff wired up, starter YAML configs, `candle_db.py`/`custom_logger.py` relocated into the package. See technical-spec for details. |
 | 2026-09-11 | Config loader implemented (task 1.6 → Done): Pydantic-validated loaders for smoothing, logging, and double-top pattern config, with unit tests covering both the real YAML files and validation failure cases. |
+| 2026-09-12 | ATR-based ZigZag thresholding implemented (task 3.1 → Done, independent of the 5.6 non-adjacency gap — addresses cross-symbol miscalibration, not within-symbol multi-scale nesting): `smoothing/atr.py`, `ZigZagConfig.method: fixed \| atr`. Verified per-symbol calibration on real data (quiet `NIFTYBEES` → 4.83% vs. volatile `ANIKINDS-BE`/`E2E` → 13–15%) and wired into `scan` (now prints the threshold used per symbol). Also caught while doing this: task 3.1 had been marked Not Started despite `zigzag_pivots` existing since the pivot-detection work — corrected. |
+| 2026-09-12 | Expanded task 5.6 into a full case study of the confirmed `E2E` non-adjacent pivot miss: isolated-candidate verification (confidence 0.703), the full 3–15% threshold sweep table, and the two candidate fix directions considered (non-adjacent matching vs. multi-resolution scanning) — decision deferred, not yet chosen. |
 | 2026-09-12 | Investigated a real missed head-and-shoulders on `E2E` (task 5.6, new): widened `head_and_shoulders.yaml`'s `max_time_separation_bars` 180→252 (fixes the span-only rejection, and surfaced 2 more real candidates on the same symbol as a side effect); documented the deeper, unresolved non-adjacent/multi-scale pivot matching gap that this example also exposed. |
 | 2026-09-12 | `scan` now logs (via `custom_logger`) a `Scanning i/total: SYMBOL` progress line per symbol and one final `Scan summary` line with per-pattern candidate counts — intentionally minimal, not per-candidate logging. |
 | 2026-09-12 | `chart-patterns scan` extended: `--all-symbols` (reads `data/all_symbols.csv`, 2,729 symbols — full-universe scan for one pattern completes in ~9s with `--no-save-charts`), `--pattern all` (scans every registered pattern via new `list_registered_patterns()`), CSV output under `output/scans/` (one row per candidate), and `--quiet` for large scans. CSV/chart filenames follow `<symbol-or-count>_<pattern-or-mul_pattern>.{csv,png}`. |

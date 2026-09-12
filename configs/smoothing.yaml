@@ -1,5 +1,10 @@
 zigzag:
-  threshold_pct: 3.0
+  method: fixed          # "fixed" (threshold_pct for every symbol) or "atr" (per-symbol, volatility-scaled)
+  threshold_pct: 3.0      # used directly when method: fixed; used as a fallback in atr mode if there
+                          # isn't enough history to compute an ATR (see docs/technical-spec.md)
+  atr:
+    period: 14
+    multiplier: 2.5
 
 savgol:
   window_length: 11

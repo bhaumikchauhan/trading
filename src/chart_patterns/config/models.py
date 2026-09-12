@@ -1,8 +1,25 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
+class ATRThresholdConfig(BaseModel):
+    period: int = Field(gt=0)
+    multiplier: float = Field(gt=0)
+
+
 class ZigZagConfig(BaseModel):
+    method: Literal["fixed", "atr"] = "fixed"
+    # Used directly when method="fixed"; used as a fallback in method="atr" when a
+    # symbol doesn't have enough bars to compute an ATR (see smoothing/atr.py).
     threshold_pct: float = Field(gt=0)
+    atr: ATRThresholdConfig | None = None
+
+    @model_validator(mode="after")
+    def check_atr_config_present(self) -> "ZigZagConfig":
+        if self.method == "atr" and self.atr is None:
+            raise ValueError("atr config is required when method='atr'")
+        return self
 
 
 class SavgolConfig(BaseModel):

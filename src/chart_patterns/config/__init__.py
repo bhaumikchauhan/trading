@@ -1,5 +1,6 @@
 from .loader import load_logging_config, load_pattern_config, load_smoothing_config
 from .models import (
+    ATRThresholdConfig,
     DoubleBottomConfig,
     DoubleTopConfig,
     HeadAndShouldersConfig,
@@ -10,6 +11,7 @@ from .models import (
 )
 
 __all__ = [
+    "ATRThresholdConfig",
     "DoubleBottomConfig",
     "DoubleTopConfig",
     "HeadAndShouldersConfig",
