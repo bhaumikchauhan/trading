@@ -50,11 +50,16 @@ def plot_pivots(
     plot_kwargs = {
         "type": "candle",
         "style": "yahoo",
-        "addplot": addplots or None,
         # This project's charts are routinely multi-year daily history; mplfinance's
         # density warning would fire on nearly every real (non-test) call otherwise.
         "warn_too_much_data": len(plot_df) + 1,
     }
+    # mpf.plot rejects an explicit None for these kwargs (e.g. addplot=None errors
+    # with "validator returned False") — both must be omitted entirely, not set to
+    # None, when there's nothing to pass (a symbol with zero detected pivots has no
+    # addplots at all, which surfaced this).
+    if addplots:
+        plot_kwargs["addplot"] = addplots
     if title is not None:
         plot_kwargs["title"] = title
 

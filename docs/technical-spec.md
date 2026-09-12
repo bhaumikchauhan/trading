@@ -478,6 +478,15 @@ mypy rejecting the registration on parameter-type variance grounds.
     without it, mplfinance's density warning fires on nearly every real
     (non-test) call, since this project's charts are routinely multi-year
     daily history.
+  - **Same `mpf.plot(kwarg=None)` gotcha, second occurrence:** a symbol with
+    zero detected pivots (e.g. a low-volatility liquid fund like `ABSLLIQUID`,
+    which barely moves) produces an empty `addplots` list, and
+    `"addplot": addplots or None` passed `addplot=None` straight through —
+    `mpf.plot` rejects that exactly like it rejected `title=None`. Both kwargs
+    are now only added to `plot_kwargs` when truthy/not-`None`, never set to
+    `None` explicitly. Caught by running the real `scan --all-symbols` CLI,
+    not by the test suite — `test_plot_pivots_handles_zero_pivots` now covers
+    it directly.
 
 ## 12. Backtesting & Metrics
 
@@ -532,6 +541,7 @@ mypy rejecting the registration on parameter-type variance grounds.
 | 2026-09-11 | Documented actual `candle_db.py` SQLite schema, API, and in-memory acceleration mode (§5); resolved SQLite access-style decision; flagged missing `custom_logger` dependency. |
 | 2026-09-11 | `custom_logger.py` provided — logging plan (§11) updated to reuse its singleton logger instead of a new `dictConfig`/YAML-driven setup; flagged its leftover bot-branding message and per-run log file accumulation as minor cleanup items. |
 | 2026-09-11 | Config loader implemented per §6: `src/chart_patterns/config/models.py` (Pydantic models `ZigZagConfig`, `SavgolConfig`, `SmoothingConfig`, `LoggingConfig`, `DoubleTopConfig`, each with cross-field validation — e.g. Savitzky-Golay window must be odd and exceed `polyorder`, a pattern's min/max time-separation bounds must be ordered) and `loader.py` (`load_smoothing_config`, `load_logging_config`, `load_pattern_config`). Patterns are looked up via a small `{name: model}` registry dict in `loader.py`, seeded with just `double_top` for now — the same shape the pattern-matcher registry (§9) will use once matchers exist, so both registries can eventually be populated together per pattern. |
+| 2026-09-12 | Fixed a real crash found via `scan --all-symbols`: `ABSLLIQUID` (a near-flat liquid fund) hit zero detected pivots, and `plot_pivots` passed `addplot=None` to `mpf.plot`, which rejects it the same way it rejects `title=None`. Both kwargs are now omitted rather than set to `None`; added `test_plot_pivots_handles_zero_pivots` as a regression test. |
 | 2026-09-12 | `scan` gained two `custom_logger` log lines (§11): per-symbol `Scanning i/total` progress and a final `Scan summary` with per-pattern candidate counts — kept deliberately minimal (no per-candidate logging), independent of `--quiet` since logging and console-verbosity are separate concerns. |
 | 2026-09-12 | `scan` CLI extended (§11): `--all-symbols` (`data/all_symbols.csv`, 2,729 symbols, ~9s full-universe single-pattern scan with `--no-save-charts`), `--pattern all` via new `patterns.list_registered_patterns()`, CSV output under `output/scans/` (`<symbol-or-N>_<pattern-or-mul_pattern>.csv`), `--quiet`. Added `tests/unit/test_cli.py` for the pure-logic pieces (filename-stem convention, symbol-file parsing, pivot/metric string formatting) — the `scan` command itself still isn't unit-tested since it depends on the real `candle_db`, consistent with §10's stated approach of manual verification for DB-dependent behavior. |
 | 2026-09-12 | Double Bottom and Head and Shoulders pattern matchers added (§9.1): `DoubleBottomConfig`/`HeadAndShouldersConfig`, `configs/patterns/{double_bottom,head_and_shoulders}.yaml`, both registered and covered by unit tests plus a real-data `chart-patterns scan` check. Double Bottom implemented as an independent mirror rather than a price-negation trick (negation breaks the percentage math); Head and Shoulders deliberately has no time-symmetry constraint between its two halves. |
